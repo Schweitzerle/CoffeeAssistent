@@ -441,8 +441,6 @@ class ProcessQuantity(py_trees.behaviour.Behaviour):
             # mit dem Task oder dem Nutzerinput.
             # ist der neue input eine Lösung für die Probleme?
 
-            # einfach überschreiben; das ist nicht fertig!
-
             new_status = py_trees.common.Status.SUCCESS
         elif self.blackboard.wandke_choose_quantity != 'undefined':
             self.own_belief.wandke_choose_quantity = self.blackboard.wandke_choose_quantity
@@ -763,6 +761,8 @@ class Planning(py_trees.behaviour.Behaviour):
         self.logger.debug("terminate: %s" % self.__class__.__name__)
 
 
+# Suche die Klasse Communicating in virtual_agent.py und ersetze die update-Methode:
+
 class Communicating(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection, agenda):
         """Configure the name of the behaviour."""
@@ -790,9 +790,10 @@ class Communicating(py_trees.behaviour.Behaviour):
                 print(f"on agenda: {todo_next}")
                 self.message_id += 1
 
-                json_data = {'username': 'assistant', 'id': self.message_id, 'message': todo_next}
-                response = requests.post("http://127.0.0.1:5001/message", data=json_data)
-                print(response)
+                # Hier nicht mehr per HTTP-Route Nachrichten senden, nur über die pipe
+                # json_data = {'username': 'assistant', 'id': self.message_id, 'message': todo_next}
+                # response = requests.post("http://127.0.0.1:5001/message", data=json_data)
+                # print(response)
 
                 msg['id'] = self.message_id
                 self.team_member.send(json.dumps(msg))
@@ -805,7 +806,6 @@ class Communicating(py_trees.behaviour.Behaviour):
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
         self.logger.debug("terminate: %s" % self.__class__.__name__)
-
 
 class Acting(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection, agenda):

@@ -5,29 +5,47 @@
 {% block content %}
 
 <div class="p-3 m-0 border-0 bd-example m-0 border-0">
+    <h2 class="mb-4">Kaffee-Assistent Studie</h2>
 
-    <form method ="post" action="#" id="loginForm" class="row g-3 needs-validation was-validated" novalidate="">
-
-    <div class="col-md-4">
-        <label for="usernameinput" class="form-label">Username</label>
-        <div class="input-group has-validation">
-          <span class="input-group-text" id="inputGroupPrepend">@</span>
-          <input type="text" class="form-control" id="usernameinput" name="username" aria-describedby="inputGroupPrepend" required="" spellcheck="false" data-ms-editor="true">
-          <div class="invalid-feedback">
-            Please provide a username.
-          </div>
+    <form method="post" action="#" id="loginForm" class="row g-3 needs-validation" novalidate="">
+        <div class="col-md-6">
+            <label for="fullnameinput" class="form-label">Vollständiger Name</label>
+            <input type="text" class="form-control" id="fullnameinput" name="fullname" spellcheck="false" data-ms-editor="true">
         </div>
-      </div>
 
-    <div class="col-12">
+        <div class="col-md-6">
+            <label for="vpid" class="form-label">VP-ID</label>
+            <input type="text" class="form-control" id="vpid" name="vpid" spellcheck="false" data-ms-editor="true">
+        </div>
 
-        <button type="submit" data-mdb-button-init data-mdb-ripple-init class="btn btn-primary btn-block mb-4">
-            Sign in
-        </button>
-    </div>
+        <div class="col-md-6">
+            <label for="usernameinput" class="form-label">Benutzername (wird im Chat angezeigt)</label>
+            <div class="input-group">
+                <span class="input-group-text" id="inputGroupPrepend">@</span>
+                <input type="text" class="form-control" id="usernameinput" name="username" aria-describedby="inputGroupPrepend" required="" spellcheck="false" data-ms-editor="true">
+                <div class="invalid-feedback">
+                    Bitte geben Sie einen Benutzernamen ein.
+                </div>
+            </div>
+        </div>
 
-  </form>
+        <div class="col-md-6">
+            <label for="llm-select" class="form-label">LLM-Modell auswählen</label>
+            <select class="form-select" id="llm-select" name="llm">
+                <option value="llama3" selected>Llama 3</option>
+                <option value="godel">Godel (simuliert)</option>
+                <option value="flant5">FLAN-T5</option>
+            </select>
+        </div>
+
+        <div class="col-12 mt-4">
+            <button type="submit" class="btn btn-primary btn-block">
+                Teilnehmen
+            </button>
+        </div>
+    </form>
 </div>
-<script src="{{ url_for('static', filename='index.js') }}"></script>
+
+<script src="{{ url_for('static', filename='login.js') }}"></script>
 
 {% endblock %}

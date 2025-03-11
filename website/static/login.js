@@ -1,20 +1,18 @@
 document.addEventListener("DOMContentLoaded", function () {
   const form = document.getElementById("loginForm");
-  form.addEventListener("submit", function (event) {
-    const usernameInput = document.getElementById("usernameinput");
-    const username = usernameInput.value.trim();
+  if (form) {
+    form.addEventListener("submit", function (event) {
+      const usernameInput = document.getElementById("usernameinput");
+      if (!usernameInput || usernameInput.value.trim() === "") {
+        // Verhindere das Absenden des Formulars
+        event.preventDefault();
 
-    if (username === "") {
-      // Prevent form submission
-      event.preventDefault();
+        // Zeige Fehlermeldung
+        usernameInput.classList.add("is-invalid");
 
-      // Display a message
-      const errorMessage = document.getElementById("error-message");
-      errorMessage.textContent = "Username cannot be empty.";
-      errorMessage.style.color = "red";
-
-      // Highlight the text field
-      usernameInput.style.borderColor = "red";
-    }
-  });
+        // Setze den Fokus auf das Eingabefeld
+        usernameInput.focus();
+      }
+    });
+  }
 });
