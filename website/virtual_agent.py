@@ -156,29 +156,16 @@ class ProcessType(py_trees.behaviour.Behaviour):
                     if self.own_belief.information_need == 'type':
                         self.own_belief.information_need = 'undefined'
                 else:
-                    # Nutzer hat anscheinend die Kaffeesorte geändert.
 
                     self.own_belief.wandke_choose_type = 'TypeValueConflict'
-            # else:
-                # in einem früheren Interaktionsschritt hatte der Bot Probleme
-                # mit dem Task oder dem Nutzerinput.
-                # ist der neue input eine Lösung für die Probleme?
-
-                # einfach überschreiben; das ist nicht fertig!
 
             self.blackboard.wandke_choose_type = 'undefined'
             new_status = py_trees.common.Status.SUCCESS
         elif self.blackboard.wandke_choose_type != 'undefined':
             self.own_belief.wandke_choose_type = self.blackboard.wandke_choose_type
-
-            # jetzt muss eine geeignete Reaktion festgelet werden.
-            # sie hängt von dem Problem ab, das der Nutzer kommuniziert hat.
             new_status = py_trees.common.Status.SUCCESS
         else:
             new_status = py_trees.common.Status.FAILURE
-
-            # type is not focussed in the belief state assumed for the user
-
         return new_status
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
@@ -239,28 +226,15 @@ class ProcessTemp(py_trees.behaviour.Behaviour):
                     if self.own_belief.information_need == 'temp':
                         self.own_belief.information_need = 'undefined'
                 else:
-                    # Nutzer hat anscheinend die Kaffeesorte geändert.
 
                     self.own_belief.wandke_choose_temp = 'TempValueConflict'
-            # else:
-            # in einem früheren Interaktionsschritt hatte der Bot Probleme
-            # mit dem Task oder dem Nutzerinput.
-            # ist der neue input eine Lösung für die Probleme?
-
-            # einfach überschreiben; das ist nicht fertig!
 
             new_status = py_trees.common.Status.SUCCESS
         elif self.blackboard.wandke_choose_temp != 'undefined':
             self.own_belief.wandke_choose_temp = self.blackboard.wandke_choose_temp
-
-            # jetzt muss eine geeignete Reaktion festgelet werden.
-            # sie hängt von dem Problem ab, das der Nutzer kommuniziert hat.
             new_status = py_trees.common.Status.SUCCESS
         else:
             new_status = py_trees.common.Status.FAILURE
-
-            # type is not focussed in the belief state assumed for the user
-
         return new_status
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
@@ -269,8 +243,6 @@ class ProcessTemp(py_trees.behaviour.Behaviour):
 
 class ProcessStrength(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection):
-        """Configure the name of the behaviour."""
-
         super(ProcessStrength, self).__init__(name)
         self.logger.debug("%s.__init__()" % self.__class__.__name__)
         self.team_member = team_member
@@ -321,28 +293,13 @@ class ProcessStrength(py_trees.behaviour.Behaviour):
                     if self.own_belief.information_need == 'strength':
                         self.own_belief.information_need = 'undefined'
                 else:
-                    # Nutzer hat anscheinend die Kaffeesorte geändert.
-
                     self.own_belief.wandke_choose_strength = 'StrengthValueConflict'
-            # else:
-            # in einem früheren Interaktionsschritt hatte der Bot Probleme
-            # mit dem Task oder dem Nutzerinput.
-            # ist der neue input eine Lösung für die Probleme?
-
-            # einfach überschreiben; das ist nicht fertig!
-
             new_status = py_trees.common.Status.SUCCESS
         elif self.blackboard.wandke_choose_strength != 'undefined':
             self.own_belief.wandke_choose_strength = self.blackboard.wandke_choose_strength
-
-            # jetzt muss eine geeignete Reaktion festgelet werden.
-            # sie hängt von dem Problem ab, das der Nutzer kommuniziert hat.
             new_status = py_trees.common.Status.SUCCESS
         else:
             new_status = py_trees.common.Status.FAILURE
-
-            # type is not focussed in the belief state assumed for the user
-
         return new_status
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
@@ -351,8 +308,6 @@ class ProcessStrength(py_trees.behaviour.Behaviour):
 
 class ProcessQuantity(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection):
-        """Configure the name of the behaviour."""
-
         super(ProcessQuantity, self).__init__(name)
         self.logger.debug("%s.__init__()" % self.__class__.__name__)
         self.team_member = team_member
@@ -421,8 +376,6 @@ class ProcessQuantity(py_trees.behaviour.Behaviour):
 
                             self.own_belief.information_need = 'undefined'
                     else:
-                        # im task state steht noch keine Sorte.
-                        # damit kann nicht geprüft werden, ob die Menge sinnvoll ist.
 
                         self.own_belief.wandke_choose_quantity = 'TypeNotYetSpecified'
                         self.own_belief.content_to_communicate = f"Die Kaffeesorte ist noch nicht ausgewählt. Bevor sie nicht gewählt ist, kann die Menge nicht angegeben werden."
@@ -430,28 +383,21 @@ class ProcessQuantity(py_trees.behaviour.Behaviour):
                     if self.own_belief.information_need == 'quantity':
                         self.own_belief.information_need = 'undefined'
                 else:
-                    # Nutzer hat anscheinend die Kaffeesorte geändert.
 
                     self.own_belief.wandke_choose_quantity = 'QuantityValueConflict'
                     self.own_belief.content_to_communicate = f"Für die Menge ist schon {self.task_state.quantity} ausgewählt werden. Weil jetzt auch {self.blackboard.quantity} gewählt wurde, kann bei der Kaffeemaschine die Menge nicht eingestellt werden."
 
                 print(f"update results in this assumption: {self.own_belief.wandke_choose_quantity}")
-            # else:
-            # in einem früheren Interaktionsschritt hatte der Bot Probleme
-            # mit dem Task oder dem Nutzerinput.
-            # ist der neue input eine Lösung für die Probleme?
+
 
             new_status = py_trees.common.Status.SUCCESS
         elif self.blackboard.wandke_choose_quantity != 'undefined':
             self.own_belief.wandke_choose_quantity = self.blackboard.wandke_choose_quantity
 
-            # jetzt muss eine geeignete Reaktion festgelet werden.
-            # sie hängt von dem Problem ab, das der Nutzer kommuniziert hat.
             new_status = py_trees.common.Status.SUCCESS
         else:
             new_status = py_trees.common.Status.FAILURE
 
-            # type is not focussed in the belief state assumed for the user
 
         return new_status
 
@@ -461,7 +407,6 @@ class ProcessQuantity(py_trees.behaviour.Behaviour):
 
 class RequestConfirmation(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection):
-        """Configure the name of the behaviour."""
 
         super(RequestConfirmation, self).__init__(name)
         self.logger.debug("%s.__init__()" % self.__class__.__name__)
@@ -636,9 +581,7 @@ class Planning(py_trees.behaviour.Behaviour):
         if len(self.agenda) > 0:
             return py_trees.common.Status.FAILURE
 
-        # wird aus der neuesten Äußerung des Nutzers angenommen, dass er kommunizieren möchte,
-        # bei einer Aktion nicht selbstständig handeln zu können (also auf einer Wandke-Ebene
-        # ein 'Problem' zu haben?
+
 
         if self.user_says.wandke_choose_type != 'undefined' and self.bot_believes.wandke_choose_type == 'in focus':
             print(f"User hat ein Problem mit Type: {self.user_says.wandke_choose_type}")
@@ -656,8 +599,6 @@ class Planning(py_trees.behaviour.Behaviour):
             print(f"User hat ein Problem mit Temperature: {self.user_says.wandke_choose_temp}")
             new_status = py_trees.common.Status.SUCCESS
 
-        # hat der bot bei der Verarbeitung der letzten Äußerung des Nutzers selbst
-        # ein Problem diagnostiziert, das er jetzt kommunzieren möchte?
 
         if self.bot_believes.wandke_choose_type != 'undefined' and self.bot_believes.wandke_choose_type != 'in focus' and self.bot_believes.wandke_choose_type != 'NoDiagnosis':
             print(f"Bot hat ein Problem mit Type: {self.bot_believes.wandke_choose_type}")
@@ -692,8 +633,6 @@ class Planning(py_trees.behaviour.Behaviour):
             new_status = py_trees.common.Status.SUCCESS
 
         if self.bot_believes.information_need == 'undefined':
-            # im Folgenden ist eine Strategie fest implementiert mit der der bot den user
-            # nach Information über Parameter fragt
 
             if self.bot_believes.communication_established == 'undefined':
                 be_proactive = random.choice([0,1], p=[0.0,1], size=(1))
@@ -746,22 +685,12 @@ class Planning(py_trees.behaviour.Behaviour):
             print("Proactive fails.")
             new_status = py_trees.common.Status.FAILURE
 
-  #      json_data = {'member' : 'bot',
-  #                   'belief' : 'task_state',
-  #                   'type' : task_state.type,
-  #                   'strength' : task_state.strength,
-  #                   'temp' : task_state.temp,
-  #                   'quantity' : task_state.quantity}
 
-  #      response = requests.post("http://127.0.0.1:5001/log_belief_state", data=json_data)
-  #      print(f"{response.status_code} {response.headers['content-type']}")
         return new_status
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
         self.logger.debug("terminate: %s" % self.__class__.__name__)
 
-
-# Suche die Klasse Communicating in virtual_agent.py und ersetze die update-Methode:
 
 class Communicating(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, team_member: multiprocessing.connection, agenda):
@@ -790,10 +719,6 @@ class Communicating(py_trees.behaviour.Behaviour):
                 print(f"on agenda: {todo_next}")
                 self.message_id += 1
 
-                # Hier nicht mehr per HTTP-Route Nachrichten senden, nur über die pipe
-                # json_data = {'username': 'assistant', 'id': self.message_id, 'message': todo_next}
-                # response = requests.post("http://127.0.0.1:5001/message", data=json_data)
-                # print(response)
 
                 msg['id'] = self.message_id
                 self.team_member.send(json.dumps(msg))
@@ -872,10 +797,7 @@ def create_root(team_member: multiprocessing.connection.Connection, agenda)-> py
                                StartCoffeeMaker("Start Coffee Machine", team_member, agenda)])])
     return root
 
-# Ergänzungen für virtual_agent.py um den Task-State zurückzusetzen
 
-# Die Funktion create_chatbot sollte angepasst werden, um sicherzustellen, dass
-# der task_state bei jeder Erstellung eines neuen Chatbots zurückgesetzt wird:
 
 def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> None:
     agenda = []
@@ -893,7 +815,6 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     user_says_that.register_key(key="wandke_production_state", access=py_trees.common.Access.WRITE)
     user_says_that.register_key(key="communicative_intent", access=py_trees.common.Access.WRITE)
 
-    # Stets mit Standardwerten initialisieren
     user_says_that.type = 'default'
     user_says_that.strength = 'default'
     user_says_that.temperature = 'default'
@@ -918,7 +839,6 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     user_belief.register_key(key="wandke_production_state", access=py_trees.common.Access.WRITE)
     user_belief.register_key(key="communicative_intent", access=py_trees.common.Access.WRITE)
 
-    # Immer mit Standardwerten initialisieren
     user_belief.type = 'default'
     user_belief.strength = 'default'
     user_belief.temperature = 'default'
@@ -944,7 +864,6 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     bot_believes.register_key(key="content_to_communicate", access=py_trees.common.Access.WRITE)
     bot_believes.register_key(key="communication_established", access=py_trees.common.Access.WRITE)
 
-    # Immer die Werte zurücksetzen
     bot_believes.type = 'default'
     bot_believes.strength = 'default'
     bot_believes.temperature = 'default'
@@ -965,13 +884,11 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     task_state.register_key(key="quantity", access=py_trees.common.Access.WRITE)
     task_state.register_key(key="temp", access=py_trees.common.Access.WRITE)
 
-    # Stets zurücksetzen auf Standardwerte
     task_state.type = 'default'
     task_state.strength = 'default'
     task_state.temp = 'default'
     task_state.quantity = 'default'
 
-    # Wichtig: Log-Ausgabe zur Bestätigung des Resets
     print("=== Task-State und Bot-Believes auf Standardwerte zurückgesetzt ===")
     print(f"task_state: type={task_state.type}, strength={task_state.strength}, temp={task_state.temp}, quantity={task_state.quantity}")
 

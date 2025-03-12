@@ -1,25 +1,17 @@
-# llm_integration.py
 import py_trees
-# Importe
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO, emit
 import json
 import multiprocessing
 import time
-import re
 from threading import Thread
-from datetime import datetime
 import os
 from datetime import datetime, timedelta
-import requests
 
-# API-Schlüssel für OpenRouter API
 os.environ["OPENROUTER_API_KEY"] = "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"
 
-# Flask-App und SocketIO initialisieren
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "kaffee123"
-# Setze Session-Timeout für das automatische Ausloggen
 app.config["PERMANENT_SESSION_LIFETIME"] = 1800  # 30 Minuten in Sekunden
 socketio = SocketIO(app)
 
@@ -73,14 +65,12 @@ Gestalte die Konversation flüssig und natürlich, ohne künstlich zu wirken.
 """
 
 
-# Basisklasse für LLM-Interfaces
 class LLMInterface:
     def process_prompt(self, prompt, system_prompt=None):
         """Verarbeitet einen Prompt und gibt eine Antwort zurück"""
         raise NotImplementedError("Subklassen müssen diese Methode implementieren")
 
 
-# OpenRouter Implementation mit OpenAI SDK
 class OpenRouterLLM(LLMInterface):
     def __init__(self, model_name="meta-llama/llama-3-8b-instruct:free", is_free=True):
         """
@@ -100,10 +90,8 @@ class OpenRouterLLM(LLMInterface):
             self.client_available = False
         else:
             try:
-                # Importiere OpenAI SDK
                 from openai import OpenAI
 
-                # Initialisiere den Client mit OpenRouter base_url
                 self.client = OpenAI(
                     base_url="https://openrouter.ai/api/v1",
                     api_key=self.api_key,
@@ -128,18 +116,17 @@ class OpenRouterLLM(LLMInterface):
         try:
             messages = []
 
-            # Füge System-Prompt hinzu, wenn vorhanden
+            # Fügt System-Prompt hinzu, wenn vorhanden
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
 
-            # Füge Benutzer-Prompt hinzu
+            # Fügt Benutzer-Prompt hinzu
             messages.append({"role": "user", "content": prompt})
 
-            # Erstelle die Anfrage mit zusätzlichen Headers für OpenRouter
             completion = self.client.chat.completions.create(
                 extra_headers={
-                    "HTTP-Referer": "https://kaffee-assistant.de",  # Kann angepasst werden
-                    "X-Title": "Kaffee-Assistent",  # Name deiner Anwendung
+                    "HTTP-Referer": "https://kaffee-assistant.de",
+                    "X-Title": "Kaffee-Assistent",
                 },
                 model=self.model_name,
                 messages=messages,
@@ -147,7 +134,7 @@ class OpenRouterLLM(LLMInterface):
                 max_tokens=800
             )
 
-            # Extrahiere und gib die Antwort zurück
+            # Extrahiert und gibt die Antwort zurück
             return completion.choices[0].message.content
 
         except Exception as e:
@@ -156,7 +143,6 @@ class OpenRouterLLM(LLMInterface):
 
     def _fallback_response(self, prompt):
         """Fallback-Antwort falls die Generierung fehlschlägt"""
-        # Gleiche Fallback-Logik wie in den anderen LLM-Klassen
         if "greeting" in prompt.lower():
             return "Hallo! Ich bin dein Kaffee-Assistent. Wie kann ich dir heute helfen? Möchtest du einen leckeren Kaffee zubereiten?"
 
@@ -188,14 +174,12 @@ class OpenRouterLLM(LLMInterface):
             return "Ich verstehe deine Anfrage. Wie kann ich dir mit deinem Kaffee helfen?"
 
 
-# LLM Manager für mehrere APIs, alle über OpenRouter
 class LLMManager:
     def __init__(self):
-        # Aktualisiere den OpenChat-Modellnamen und füge ein neues Modell hinzu
         self.llms = {
             # OpenRouter Modelle (kostenlos)
             "llama3-8b": OpenRouterLLM(model_name="meta-llama/llama-3-8b-instruct:free"),
-            "phi3-mini": OpenRouterLLM(model_name="microsoft/phi-3-mini-128k-instruct:free"),  # Phi-3-Mini statt Medium
+            "phi3-mini": OpenRouterLLM(model_name="microsoft/phi-3-mini-128k-instruct:free"),
             "openchat-3.5": OpenRouterLLM(model_name="openchat/openchat-7b:free")
         }
         self.current_llm = "llama3-8b"  # Standard-LLM
@@ -208,10 +192,8 @@ class LLMManager:
 
     def process_prompt(self, prompt, system_prompt=None):
         try:
-            # Versuche, die Anfrage mit dem aktuellen LLM zu verarbeiten
             result = self.llms[self.current_llm].process_prompt(prompt, system_prompt)
 
-            # Überprüfe, ob das Ergebnis Fehler oder seltsame Formatierungen enthält
             if "role" in result or "user_choice" in result or result.strip().startswith(
                     "{") or result.strip().startswith("["):
                 print(f"Fehlerhafte Antwort vom Modell {self.current_llm}, verwende Fallback")
@@ -287,7 +269,6 @@ def log_user_activity(activity_type, user_data=None):
         print(f"Fehler beim Loggen der Benutzeraktivität: {e}")
 
 
-# Verbesserte start_bot_process-Funktion für llm_integration.py
 def start_bot_process():
     """Startet den Bot-Prozess und richtet die Kommunikation ein"""
     global decision_tree_pipe, bot_process, listen_thread
@@ -316,12 +297,11 @@ def start_bot_process():
         # Kurze Pause, um den Bot-Prozess zu initialisieren
         time.sleep(0.5)
 
-        # Prüfe, ob der Prozess gestartet ist
+        # Prüft, ob der Prozess gestartet ist
         if not bot_process.is_alive():
             print("WARNUNG: Bot-Prozess wurde gestartet, scheint aber nicht zu laufen!")
             return False
 
-        # Verwalte die Hör-Threads
         if listen_thread is not None and listen_thread.is_alive():
             print("Bestehender Listen-Thread läuft bereits")
         else:
@@ -332,7 +312,6 @@ def start_bot_process():
 
         print(f"Bot-Prozess (PID {bot_process.pid}) und Kommunikation gestartet")
 
-        # Optional: Begrüßungsnachricht direkt senden, um die Kommunikation zu initiieren
         try:
             greeting_message = {"communicative_intent": "greeting"}
             decision_tree_pipe.send(json.dumps(greeting_message))
@@ -347,8 +326,6 @@ def start_bot_process():
         traceback.print_exc()
         return False
 
-
-# Diese Funktion in llm_integration.py ersetzen
 
 def update_machine_state_from_user_selection(json_data):
     """Aktualisiert den machine_state direkt basierend auf der Benutzereingabe"""
@@ -384,7 +361,7 @@ def is_start_command(message):
     # Nachricht normalisieren (Kleinbuchstaben, Leerzeichen entfernen)
     message_lower = message.lower().strip()
 
-    # Prüfen auf exakte Übereinstimmung oder als Teil der Nachricht
+    # Prüft auf exakte Übereinstimmung oder als Teil der Nachricht
     return any(cmd == message_lower or cmd in message_lower.split() for cmd in start_commands)
 
 
@@ -392,7 +369,7 @@ def process_user_message(message):
     """Verarbeitet eine Nachricht vom Benutzer und leitet sie an den Entscheidungsbaum weiter"""
     global decision_tree_pipe, conversation_context, machine_state
     try:
-        # Sende sofort eine Statusmeldung, dass die Verarbeitung beginnt (für UI)
+        # Sendet sofort eine Statusmeldung, dass die Verarbeitung beginnt (für UI)
         socketio.emit(
             "processing_status",
             {
@@ -407,7 +384,7 @@ def process_user_message(message):
             "content": message
         })
 
-        # Bestimme den aktuellen Fokus basierend auf dem letzten Zustand des Entscheidungsbaums
+        # Bestimmt den aktuellen Fokus basierend auf dem letzten Zustand des Entscheidungsbaums
         current_focus = None
         if len(conversation_context) > 1 and len(message_queue) > 0 and "raw_json" in message_queue[-1]:
             try:
@@ -428,7 +405,6 @@ def process_user_message(message):
 
         print(f"Aktueller Fokus des Entscheidungsbaums: {current_focus or 'unbekannt'}")
 
-        # NEUE LOGIK: Direkte Erkennung von Startbefehlen für den Produktionsstatus
         if current_focus == "production" and is_start_command(message):
             print(f"Startbefehl erkannt: '{message}' - Starte Kaffeezubereitung direkt")
             json_data = {
@@ -436,7 +412,7 @@ def process_user_message(message):
                 "wandke_production_state": "started"
             }
 
-            # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+            # Signalisiert, dass der JSON-Verarbeitungsschritt abgeschlossen ist
             socketio.emit(
                 "processing_status",
                 {
@@ -445,7 +421,7 @@ def process_user_message(message):
                 }
             )
 
-            # Sende eine Statusmeldung, dass der Entscheidungsbaum startet
+            # Sendt eine Statusmeldung, dass der Entscheidungsbaum startet
             socketio.emit(
                 "processing_status",
                 {
@@ -454,14 +430,13 @@ def process_user_message(message):
                 }
             )
 
-            # Drucke das JSON für Debug-Zwecke
+            # Loggt das JSON für Debug-Zwecke
             print(f"Sende direkt an Entscheidungsbaum: {json_data}")
 
             # Senden der Nachricht an den Entscheidungsbaum
             decision_tree_pipe.send(json.dumps(json_data))
             return True
 
-        # Überprüfe, ob es sich wahrscheinlich um eine Nachfrage handelt
         message_lower = message.lower()
         is_question = False
         question_indicators = ["was", "wie", "welche", "wann", "wo", "warum", "wieso", "wer", "?", "unterschied",
@@ -473,7 +448,6 @@ def process_user_message(message):
                 is_question = True
                 break
 
-        # VERBESSERT: Checke auch nach Stärken, Mengen oder Temperatur-Begriffen
         info_request_keywords = {
             "strength": ["stärke", "stark", "mild", "intensiv", "double shot", "kräftig"],
             "quantity": ["menge", "milliliter", "ml", "groß", "klein", "viel", "wenig"],
@@ -481,15 +455,13 @@ def process_user_message(message):
             "type": ["sorte", "kaffee", "espresso", "cappuccino", "americano", "latte", "macchiato"]
         }
 
-        # Prüfen ob bestimmte Informationen angefragt werden
         requested_info_type = None
         for info_type, keywords in info_request_keywords.items():
             if any(keyword in message_lower for keyword in keywords):
-                if is_question:  # Kombiniere mit Frageindikatoren für mehr Präzision
+                if is_question:
                     requested_info_type = info_type
                     break
 
-        # NEU: Prüfe auf direkte Wertangaben bei aktuellem Fokus
         is_direct_value = False
         direct_value = None
 
@@ -523,7 +495,6 @@ def process_user_message(message):
                     direct_value = value
                     break
 
-        # Für Mengenangaben - numerische Werte
         elif current_focus == "quantity":
             import re
             quantity_match = re.search(r'(\d+)', message_lower)
@@ -531,7 +502,7 @@ def process_user_message(message):
                 is_direct_value = True
                 direct_value = quantity_match.group(1)
 
-        # Wenn eine direkte Wertangabe erkannt wurde, erstelle ein entsprechendes JSON
+        # Wenn eine direkte Wertangabe erkannt wurde, erstellt ein entsprechendes JSON
         if is_direct_value and direct_value and not is_question:
             print(f"Direkte Wertangabe erkannt: {direct_value} für {current_focus}")
             json_data = {"communicative_intent": "inform"}
@@ -557,7 +528,7 @@ def process_user_message(message):
                 machine_state["quantity"] = direct_value  # Direkte Aktualisierung
                 print(f"Machine state direkt aktualisiert: quantity = {direct_value}")
 
-            # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+            # Signalisiert, dass der JSON-Verarbeitungsschritt abgeschlossen ist
             socketio.emit(
                 "processing_status",
                 {
@@ -566,7 +537,7 @@ def process_user_message(message):
                 }
             )
 
-            # Sende eine Statusmeldung, dass der Entscheidungsbaum startet (für UI)
+            # Sendet eine Statusmeldung, dass der Entscheidungsbaum startet (für UI)
             socketio.emit(
                 "processing_status",
                 {
@@ -575,18 +546,15 @@ def process_user_message(message):
                 }
             )
 
-            # Drucke das endgültige JSON für Debug-Zwecke
             print(f"Sende an Entscheidungsbaum: {json_data}")
 
             # Senden der Nachricht an den Entscheidungsbaum
             decision_tree_pipe.send(json.dumps(json_data))
             return True
 
-        # VERBESSERT: Direktere Behandlung von Informationsanfragen
         if is_question:
-            # Wenn der Benutzer fragt "Was sind nochmal alle stärken" und wir sind im strength Fokus
             if requested_info_type and current_focus and requested_info_type == current_focus:
-                # Erstelle eine detaillierte Informationsantwort für den aktuellen Fokus
+                # Erstellt eine detaillierte Informationsantwort für den aktuellen Fokus
                 info_json = {"communicative_intent": "request_information"}
                 if current_focus == "type":
                     info_json["wandke_choose_type"] = "in focus"
@@ -600,21 +568,21 @@ def process_user_message(message):
                 print(
                     f"Erkannte Informationsanfrage über {requested_info_type} im aktuellen Fokus, generiere LLM-Antwort")
 
-                # Generiere eine maßgeschneiderte LLM-Antwort
+                # Generiert eine maßgeschneiderte LLM-Antwort
                 llm_info_prompt = create_info_prompt(current_focus, machine_state)
                 detailed_info = llm_manager.process_prompt(llm_info_prompt, SYSTEM_PROMPT)
 
-                # Erstelle eine einzigartige ID für die Nachricht
+                # Erstellt eine einzigartige ID für die Nachricht
                 message_id = int(time.time() * 1000)
 
-                # Sende die Antwort direkt als Chat-Nachricht
+                # Sendet die Antwort direkt als Chat-Nachricht
                 socketio.emit("chat_message", {
                     "sender": "assistant",
                     "message": detailed_info,
                     "id": message_id
                 })
 
-                # Füge die Nachricht zum Verlauf hinzu
+                # Fügt die Nachricht zum Verlauf hinzu
                 message_queue.append({
                     "sender": "assistant",
                     "message": detailed_info,
@@ -622,13 +590,13 @@ def process_user_message(message):
                     "id": message_id
                 })
 
-                # Füge die Antwort zum Konversationskontext hinzu
+                # Fügt die Antwort zum Konversationskontext hinzu
                 conversation_context.append({
                     "role": "assistant",
                     "content": detailed_info
                 })
 
-                # Signalisiere, dass die Verarbeitung abgeschlossen ist
+                # Signalisiert, dass die Verarbeitung abgeschlossen ist
                 socketio.emit(
                     "processing_status",
                     {
@@ -695,8 +663,6 @@ def process_user_message(message):
                 json_data = {"communicative_intent": "request_information"}
                 print("Allgemeine Informationsanfrage ohne Fokus")
         else:
-            # Nicht-Frage-Nachricht: Standard-LLM-Verarbeitung für Auswahlen
-
             # Ein klarer Prompt für das LLM
             interpretation_prompt = f"""
             Du bist ein Interpret für einen Kaffee-Assistenten. Deine Aufgabe ist es, Benutzernachrichten in JSON-Befehle für den Entscheidungsbaum zu übersetzen.
@@ -757,9 +723,9 @@ def process_user_message(message):
             llm_response = llm_manager.process_prompt(interpretation_prompt)
             print(f"LLM-Interpretation der Benutzereingabe: {llm_response}")
 
-            # Versuche, die LLM-Antwort als JSON zu parsen
+            # Versucht, die LLM-Antwort als JSON zu parsen
             try:
-                # Versuche zuerst mit der direkten Antwort
+                # Versucht es zuerst mit der direkten Antwort
                 json_data = json.loads(llm_response)
             except json.JSONDecodeError:
                 try:
@@ -769,7 +735,7 @@ def process_user_message(message):
                     if json_match:
                         json_data = json.loads(json_match.group(0))
                     else:
-                        # Wenn keine JSON-Struktur gefunden wurde, erstelle einen absoluten Fallback
+                        # Wenn keine JSON-Struktur gefunden wurde, erstellen eines absoluten Fallback
                         if current_focus:
                             # Bei erkannten Werten im aktuellen Fokus
                             if is_direct_value and direct_value:
@@ -787,7 +753,7 @@ def process_user_message(message):
                                     json_data["quantity"] = direct_value
                                     json_data["wandke_choose_quantity"] = "NoDiagnosis"
                             else:
-                                # Verwende den aktuellen Fokus für Nachfragen
+                                # Verwendet den aktuellen Fokus für Nachfragen
                                 json_data = {"communicative_intent": "request_information"}
                                 if current_focus == "type":
                                     json_data["wandke_choose_type"] = "in focus"
@@ -809,13 +775,13 @@ def process_user_message(message):
                     # Absoluter Fallback
                     json_data = {"communicative_intent": "request_information"}
 
-        # Entferne alle Schlüssel mit None/null-Werten
+        # Entfernt alle Schlüssel mit None/null-Werten
         if isinstance(json_data, dict):
             json_data = {k: v for k, v in json_data.items() if v is not None}
 
         update_machine_state_from_user_selection(json_data)
 
-        # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+        # Signalisiert, dass der JSON-Verarbeitungsschritt abgeschlossen ist
         socketio.emit(
             "processing_status",
             {
@@ -833,7 +799,7 @@ def process_user_message(message):
             }
         )
 
-        # Drucke das endgültige JSON für Debug-Zwecke
+        # Logge das endgültige JSON für Debug-Zwecke
         print(f"Sende an Entscheidungsbaum: {json_data}")
 
         # Senden der Nachricht an den Entscheidungsbaum
@@ -843,7 +809,6 @@ def process_user_message(message):
         print(f"Fehler bei der Verarbeitung der Benutzernachricht: {e}")
         import traceback
         traceback.print_exc()
-        # Informiere den Client über den Fehler (für UI)
         socketio.emit(
             "processing_status",
             {
@@ -855,7 +820,6 @@ def process_user_message(message):
         return False
 
 
-# Füge diese Hilfsfunktion hinzu
 def create_info_prompt(focus_type, machine_state):
     """Erstellt einen Prompt für das LLM, um detaillierte Informationen zu einem Fokustyp zu liefern"""
     if focus_type == "type":
@@ -1037,7 +1001,7 @@ def process_with_llm(json_data):
                 task_state.register_key(key="quantity", access=py_trees.common.Access.READ)
                 task_state.register_key(key="temp", access=py_trees.common.Access.READ)
 
-                # Aktualisiere machine_state mit den tatsächlichen Werten aus task_state
+                # Aktualisiert machine_state mit den tatsächlichen Werten aus task_state
                 if task_state.type != 'default':
                     machine_state["type"] = task_state.type
                 if task_state.strength != 'default':
@@ -1275,7 +1239,7 @@ def process_with_llm(json_data):
 
             return llm_response
         else:
-            # Bei normalen Nachrichten, generiere eine Antwort basierend auf dem Fokus wie bisher
+            # Bei normalen Nachrichten, generiert eine Antwort basierend auf dem Fokus wie bisher
             next_action_prompt = ""
             if current_focus == "type":
                 next_action_prompt = """
@@ -1428,31 +1392,49 @@ def process_with_llm(json_data):
                     # Vor der Erstellung der Abschlussnachricht die Zustandsinformationen aktualisieren
                     reconstruct_machine_state()
 
-                    # Direkt die Werte aus machine_state verwenden
+                    # Parameter sammeln, wie bisher
                     kaffeetyp = machine_state["type"] or "Espresso"
                     staerke = machine_state["strength"] or "normal"
-                    temperatur = machine_state["temp"] or "normal"  # Hier war der Fehler
+                    temperatur = machine_state["temp"] or "normal"
                     menge = machine_state["quantity"] or "40"
 
-                    # Debug-Ausgabe
-                    print(
-                        f"Gefundene Parameter für Abschlussnachricht: Typ={kaffeetyp}, Stärke={staerke}, Temp={temperatur}, Menge={menge}")
+                    # Spezieller Prompt für die "Kaffee fertig"-Nachricht
+                    coffee_ready_prompt = f"""
+                    Der Kaffee des Benutzers ist jetzt fertig zubereitet.
 
-                    # Erstelle eine freundlichere, ansprechendere Nachricht
-                    llm_response = f"""
-                           Dein {kaffeetyp} ist fertig zubereitet! 🎉
+                    Folgende Parameter wurden verwendet:
+                    - Kaffeetyp: {kaffeetyp}
+                    - Stärke: {staerke}
+                    - Temperatur: {temperatur}
+                    - Menge: {menge}ml
 
-                           Hier ist dein {kaffeetyp} mit {staerke} Stärke, {temperatur} Temperatur und {menge}ml.
+                    Formuliere eine freundliche, enthusiastische Nachricht auf Deutsch, die:
+                    1. Mitteilt, dass der Kaffee fertig ist
+                    2. Die gewählten Parameter erwähnt
+                    3. Dem Benutzer einen guten Genuss wünscht
+                    4. Anbietet, später einen weiteren Kaffee zuzubereiten
 
-                           Genieße deinen frisch zubereiteten Kaffee! Wenn du später einen weiteren Kaffee möchtest oder Fragen zur Kaffeemaschine hast, stehe ich dir gerne zur Verfügung.
-                           """
+                    Verwende einen fröhlichen, serviceorientierten Ton, wie ein freundlicher Barista.
+                    Du kannst gerne Emojis verwenden, aber nicht zu viele.
+                    """
+
+                    llm_response = llm_manager.process_prompt(coffee_ready_prompt, SYSTEM_PROMPT)
+
+                    if not llm_response or len(llm_response.strip()) < 20:
+                        print("LLM-Antwort zu kurz, verwende Fallback")
+                        llm_response = f"""
+                        Dein {kaffeetyp} ist fertig zubereitet! 🎉
+
+                        Hier ist dein {kaffeetyp} mit {staerke} Stärke, {temperatur} Temperatur und {menge}ml.
+
+                        Genieße deinen frisch zubereiteten Kaffee! Wenn du später einen weiteren Kaffee möchtest oder Fragen zur Kaffeemaschine hast, stehe ich dir gerne zur Verfügung.
+                        """
                 except Exception as e:
                     print(f"Fehler beim Erstellen der Ready-Nachricht: {e}")
                     import traceback
                     traceback.print_exc()
                     llm_response = "Dein Kaffee ist jetzt fertig! Genieße deinen Kaffee. Kann ich dir sonst noch etwas anbieten?"
 
-                    # Durchsuche die letzten Nachrichten rückwärts, um die aktuellsten Werte zu finden
                     for msg in reversed(message_queue):
                         if "raw_json" in msg:
                             try:
@@ -1476,7 +1458,6 @@ def process_with_llm(json_data):
                             except:
                                 pass
 
-                        # Überprüfe auch die Nachricht selbst auf Informationen
                         if "message" in msg:
                             if selected_type is None and any(typ in msg["message"].lower() for typ in
                                                              ["espresso", "cappuccino", "americano",
@@ -1486,7 +1467,6 @@ def process_with_llm(json_data):
                                         selected_type = typ
                                         break
 
-                    # Durchsuche auch die Konversationshistorie
                     for msg in conversation_context:
                         if msg["role"] == "user" and selected_type is None:
                             if any(typ in msg["content"].lower() for typ in
@@ -1503,7 +1483,6 @@ def process_with_llm(json_data):
                                         selected_strength = strength
                                         break
 
-                    # Fallbacks, falls Werte immer noch fehlen
                     kaffeetyp = selected_type or machine_state["type"] or "Espresso"
                     staerke = selected_strength or machine_state["strength"] or "normal"
                     temperatur = selected_temp or machine_state["temp"] or "normal"
@@ -1513,7 +1492,7 @@ def process_with_llm(json_data):
                     print(
                         f"Gefundene Parameter für Abschlussnachricht: Typ={kaffeetyp}, Stärke={staerke}, Temp={temperatur}, Menge={menge}")
 
-                    # Erstelle eine freundlichere, ansprechendere Nachricht
+                    # Erstellen einer freundlichen, ansprechenden Nachricht
                     llm_response = f"""
                     Dein {kaffeetyp} ist fertig zubereitet! 🎉
 
@@ -1527,7 +1506,6 @@ def process_with_llm(json_data):
                     traceback.print_exc()
                     llm_response = "Dein Kaffee ist jetzt fertig! Genieße deinen Kaffee. Kann ich dir sonst noch etwas anbieten?"
 
-            # Bei der Produktionsbestätigung auch eine klare Nachricht sicherstellen
             elif current_focus == "production" and (
                     "stärke" in llm_response.lower() or "temperatur" in llm_response.lower()):
                 try:
@@ -1540,17 +1518,39 @@ def process_with_llm(json_data):
                     menge = machine_state["quantity"] if machine_state["quantity"] not in [None, "default",
                                                                                            "None"] else "Standard"
 
-                    # Ansprechendere, detailliertere Bestätigungsnachricht
-                    llm_response = f"""
-                    Super! Alle Einstellungen sind perfekt:
-
-                    - {kaffeetyp}
+                    # Spezielle Prompt für die Bestätigungsnachricht
+                    confirmation_prompt = f"""
+                    Alle Parameter für die Kaffeezubereitung wurden ausgewählt und sind wie folgt:
+                    - Kaffeetyp: {kaffeetyp}
                     - Stärke: {staerke}
                     - Temperatur: {temperatur}
                     - Menge: {menge}ml
 
-                    Möchtest du jetzt deinen {kaffeetyp} zubereiten lassen? Sage einfach "Ja" oder "Kaffee starten".
+                    Formuliere eine freundliche, übersichtliche Zusammenfassung auf Deutsch, die:
+                    1. Bestätigt, dass alle Einstellungen ausgewählt wurden
+                    2. Die gewählten Parameter klar auflistet
+                    3. Den Benutzer fragt, ob er mit diesen Einstellungen den Kaffee zubereiten möchte
+                    4. Erwähnt, dass der Benutzer einfach "Ja", "Starten" oder "Kaffee machen" sagen kann
+
+                    Verwende einen serviceorientierten, freundlichen Ton. Der Benutzer sollte klar verstehen, 
+                    dass er jetzt nur noch bestätigen muss, um den Kaffee zu starten.
                     """
+
+                    # LLM-Antwort für die Bestätigungsnachricht generieren
+                    llm_response = llm_manager.process_prompt(confirmation_prompt, SYSTEM_PROMPT)
+
+                    if not llm_response or len(llm_response.strip()) < 20:
+                        print("LLM-Antwort zu kurz, verwende Fallback")
+                        llm_response = f"""
+                        Super! Alle Einstellungen sind perfekt:
+
+                        - {kaffeetyp}
+                        - Stärke: {staerke}
+                        - Temperatur: {temperatur}
+                        - Menge: {menge}ml
+
+                        Möchtest du jetzt deinen {kaffeetyp} zubereiten lassen? Sage einfach "Ja" oder "Kaffee starten".
+                        """
                 except Exception as e:
                     print(f"Fehler beim Erstellen der Produktionsbestätigungs-Nachricht: {e}")
                     llm_response = "Alles eingestellt! Möchtest du die Kaffeezubereitung jetzt starten?"
@@ -1588,15 +1588,12 @@ def listen_to_decision_tree():
                 tree_message = decision_tree_pipe.recv()
                 print(f"Vom Entscheidungsbaum empfangen: {tree_message}")
 
-                # Versuche, die Nachricht als JSON zu parsen, um besseren Einblick zu haben
                 try:
                     json_message = json.loads(tree_message) if isinstance(tree_message, str) else tree_message
                     print(f"Entscheidungsbaum-Nachricht als JSON: {json_message}")
 
-                    # VERBESSERT: Rekonstruiere Zustand aus allen Quellen
                     reconstruct_machine_state()
 
-                    # NEU: Prüfe und speichere den aktuellen Fokus
                     if "wandke_choose_type" in json_message and json_message["wandke_choose_type"] == "in focus":
                         current_focus = "type"
                         last_focus_time = time.time()
@@ -1616,10 +1613,8 @@ def listen_to_decision_tree():
                         current_focus = "production"
                         last_focus_time = time.time()
 
-                    # NEU: Prüfe, ob es sich um eine direkte Informationsanfrage handelt
                     if "message" in json_message and json_message.get("communicative_intent") == "request_information":
-                        # Bei einer Informationsanfrage, sende die Nachricht direkt an den Client
-                        # ohne weitere LLM-Verarbeitung
+
                         direct_message = json_message["message"]
 
                         # Erstelle eine einzigartige ID für die Nachricht
@@ -1648,10 +1643,7 @@ def listen_to_decision_tree():
                             "content": direct_message
                         })
 
-                        # NEU: Wiederhole den aktuellen Fokus-Prompt, um den Entscheidungsbaum im Fokus zu halten
-                        # Verwende nicht nur message_queue, sondern auch den gespeicherten current_focus
-                        if current_focus and (time.time() - last_focus_time) < 60:  # Nur wenn aktuell (< 60 Sekunden)
-                            # Stelle sicher, dass der Fokus auf dem aktuellen Parameter bleibt
+                        if current_focus and (time.time() - last_focus_time) < 60:
                             focus_message = {"communicative_intent": "request_information"}
 
                             if current_focus == "type":
@@ -1743,7 +1735,6 @@ def listen_to_decision_tree():
                                     # Erstelle eine einzigartige ID für die Fokus-Nachricht
                                     focus_message_id = int(time.time() * 1000) + 1
 
-                                    # Kleine Verzögerung
                                     time.sleep(0.5)
 
                                     socketio.emit("chat_message", {
@@ -1770,7 +1761,6 @@ def listen_to_decision_tree():
                             except Exception as focus_error:
                                 print(f"Fehler beim Wiederherstellen des Fokus: {focus_error}")
 
-                        # Überspringe die normale Verarbeitung
                         continue
 
                 except Exception as e:
@@ -1827,17 +1817,14 @@ def listen_to_decision_tree():
                     "id": message_id
                 })
 
-                # NEU: Wenn der Kaffee fertig ist, sende eine abschließende Nachricht und deaktiviere die Eingabe
                 try:
                     data = json.loads(tree_message) if isinstance(tree_message, str) else tree_message
                     if "wandke_production_state" in data and data["wandke_production_state"] == "ready":
-                        # Extrahiere die Kaffee-Parameter
                         kaffeetyp = None
                         staerke = None
                         temperatur = None
                         menge = None
 
-                        # Durchsuche die letzten Nachrichten rückwärts
                         for msg in reversed(message_queue):
                             if "raw_json" in msg:
                                 try:
@@ -1861,7 +1848,6 @@ def listen_to_decision_tree():
                                 except:
                                     pass
 
-                        # Auch in den Nachrichten nach Kaffeetypen suchen
                         if kaffeetyp is None:
                             for msg in message_queue:
                                 if "message" in msg:
@@ -1875,7 +1861,6 @@ def listen_to_decision_tree():
                                     elif "latte" in msg_text and kaffeetyp is None:
                                         kaffeetyp = "Latte Macchiato"
 
-                        # Fülle Standardwerte
                         kaffeetyp = kaffeetyp or "Kaffee"
                         staerke = staerke or "normal"
                         temperatur = temperatur or "normal"
@@ -1893,7 +1878,7 @@ def listen_to_decision_tree():
                             "id": int(time.time() * 1000)
                         })
 
-                        # Deaktiviere die Eingabe über ein spezielles Event
+                        # Deaktiviert die Eingabe über ein spezielles Event
                         socketio.emit("interaction_complete", {
                             "status": "complete",
                             "message": "Interaktion abgeschlossen",
@@ -1943,12 +1928,12 @@ def listen_to_decision_tree():
                     "error": "Verbindung zum Entscheidungsbaum unterbrochen"
                 }
             )
-            time.sleep(5)  # Warte 5 Sekunden vor dem Versuch eines Neustarts
+            time.sleep(5)
             try:
-                start_bot_process()  # Versuche, den Bot-Prozess neu zu starten
+                start_bot_process()
             except Exception as e:
                 print(f"Fehler beim Neustart des Bot-Prozesses: {e}")
-                time.sleep(10)  # Warte länger, wenn der Neustart fehlschlägt
+                time.sleep(10)
         except Exception as e:
             print(f"Fehler beim Abhören des Entscheidungsbaums: {e}")
             socketio.emit(
@@ -1967,7 +1952,6 @@ def reconstruct_machine_state():
 
         print("Rekonstruiere den machine_state aus allen Quellen...")
 
-        # Versuche zuerst, alle Werte aus dem task_state zu bekommen
         try:
             from py_trees.blackboard import Client
             task_state = Client(name="State of the coffee production task",
@@ -1977,7 +1961,7 @@ def reconstruct_machine_state():
             task_state.register_key(key="quantity", access=py_trees.common.Access.READ)
             task_state.register_key(key="temp", access=py_trees.common.Access.READ)
 
-            # Aktualisiere machine_state mit den tatsächlichen Werten aus task_state
+            # Aktualisiet machine_state mit den tatsächlichen Werten aus task_state
             if task_state.type != 'default':
                 machine_state["type"] = task_state.type
                 print(f"Aus task_state: type = {task_state.type}")
@@ -1993,14 +1977,12 @@ def reconstruct_machine_state():
         except Exception as e:
             print(f"Fehler beim Zugriff auf task_state: {e}")
 
-        # Durchsuche dann die letzten Nachrichten im Nachrichtenverlauf
         try:
             for msg in reversed(message_queue):
                 if "raw_json" in msg:
                     try:
                         raw_data = json.loads(msg["raw_json"])
 
-                        # NEU: Aktualisiere direkt aus den Benutzereingaben
                         if raw_data.get("communicative_intent") == "inform":
                             if "type" in raw_data and raw_data["type"] not in [None, "default",
                                                                                "None"] and raw_data.get(
@@ -2031,7 +2013,6 @@ def reconstruct_machine_state():
         except Exception as e:
             print(f"Fehler beim Durchsuchen des Nachrichtenverlaufs: {e}")
 
-        # Zuletzt, durchsuche die Konversationshistorie nach expliziten Werten
         try:
             # Prüfe auf Kaffeetyp
             if machine_state["type"] is None:
@@ -2072,7 +2053,6 @@ def reconstruct_machine_state():
                 for msg in conversation_context:
                     if msg["role"] == "user":
                         msg_lower = msg["content"].lower()
-                        # Suche nach Zahlen
                         import re
                         quantity_match = re.search(r'(\d+)', msg_lower)
                         if quantity_match:
@@ -2102,7 +2082,6 @@ def handle_keep_alive():
         return {"status": "success"}
 
 
-# Flask-Routen
 @app.route("/")
 @app.route("/home")
 def home():
@@ -2113,7 +2092,6 @@ def home():
     return render_template("index.html", username=session.get("username", "Gast"))
 
 
-# Korrigierte login-Funktion für llm_integration.py
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Login-Seite"""
@@ -2128,7 +2106,7 @@ def login():
         # Optionale Felder
         fullname = request.form.get("fullname", "")
         vpid = request.form.get("vpid", "")
-        selected_llm = request.form.get("llm", "llama3-8b")  # Standardwert angepasst
+        selected_llm = request.form.get("llm", "llama3-8b")
 
         # In Session speichern
         session["username"] = username
@@ -2138,10 +2116,8 @@ def login():
             session["vpid"] = vpid
         if selected_llm:
             session["selected_llm"] = selected_llm
-            # Setze auch das aktuelle LLM
             llm_manager.set_current_llm(selected_llm)
 
-        # Versuche Aktivität zu loggen, aber fahre fort auch wenn Logging fehlschlägt
         try:
             log_user_activity("login", {
                 "username": username,
@@ -2193,7 +2169,6 @@ def logout():
     return redirect(url_for("login"))
 
 
-# Verbesserte restart_interaction-Funktion für llm_integration.py
 @app.route("/restart_interaction", methods=["GET"])
 def restart_interaction():
     """Setzt den Bot zurück und startet eine neue Interaktion"""
@@ -2217,11 +2192,11 @@ def restart_interaction():
             log_user_activity("new_interaction", {"username": session.get("username", "unbekannt")})
             print(f"Neue Interaktion für Benutzer {session.get('username', 'unbekannt')} gestartet")
 
-        # Stelle sicher, dass die Session nicht abläuft
+        # Stellt sicher, dass die Session nicht abläuft
         if 'username' in session:
             session.modified = True
 
-        # Füge eine kleine Verzögerung ein, um sicherzustellen, dass alle Prozesse beendet sind
+        # Kleine Verzögerung, um sicherzustellen, dass alle Prozesse beendet sind
         time.sleep(0.5)
 
         # Bot-Prozess neu starten
@@ -2399,7 +2374,7 @@ def handle_llm_selection(data):
     """Verarbeitet die Auswahl eines LLMs"""
     global llm_manager
 
-    llm_name = data.get("llm", "llama3-8b")  # Standardwert angepasst
+    llm_name = data.get("llm", "llama3-8b")
     username = session.get("username", "unbekannt")
 
     if llm_manager.set_current_llm(llm_name):
@@ -2484,7 +2459,6 @@ def handle_message_rating_event(data):
         with open(log_file, "a") as f:
             f.write(log_entry)
 
-        # Bestätigung an den Client senden
         return {"status": "success"}
     except Exception as e:
         print(f"Fehler bei der Verarbeitung der Nachrichtenbewertung: {e}")
@@ -2492,9 +2466,7 @@ def handle_message_rating_event(data):
         traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
-# Der Server-Start muss außerhalb aller Funktionen sein
 if __name__ == "__main__":
-    # Session-Datei löschen, wenn vorhanden (für Entwicklungsumgebung)
     import os
 
     try:
@@ -2502,7 +2474,6 @@ if __name__ == "__main__":
             import shutil
 
             shutil.rmtree("flask_session")
-        # Alternative: Flask verwendet standardmäßig einen signierten Cookie
         app.config["SESSION_TYPE"] = "filesystem"
         app.config["SESSION_FILE_DIR"] = "./flask_session"
         from flask_session import Session
@@ -2511,7 +2482,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Info: Konnte Session nicht löschen: {e}")
 
-    # Bot-Prozess wird nicht mehr hier gestartet, sondern erst wenn ein Client verbindet
     print("Starte Flask-Server auf Port 5001...")
 
     # Flask-App starten
