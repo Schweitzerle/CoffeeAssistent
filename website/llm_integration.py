@@ -1,5 +1,5 @@
 # llm_integration.py
-
+import py_trees
 # Importe
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO, emit
@@ -8,18 +8,13 @@ import multiprocessing
 import time
 import re
 from threading import Thread
-from ollama import Client
 from datetime import datetime
 import os
 from datetime import datetime, timedelta
+import requests
 
-# Importe für FLAN-T5
-from transformers import T5Tokenizer, T5ForConditionalGeneration
-import torch
-
-# Konfiguration für Llama
-MODEL_NAME = "llama3:latest"  # Ändere dies bei Bedarf
-LLM_HOST = "http://localhost:11434"  # Anpassen an den Server, auf dem Ollama läuft
+# API-Schlüssel für OpenRouter API
+os.environ["OPENROUTER_API_KEY"] = "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"
 
 # Flask-App und SocketIO initialisieren
 app = Flask(__name__)
@@ -30,7 +25,6 @@ socketio = SocketIO(app)
 
 # Globale Variablen
 decision_tree_pipe = None
-llm_client = None
 bot_process = None
 listen_thread = None
 message_queue = []
@@ -41,8 +35,6 @@ if not os.path.exists(LOGS_FOLDER):
     os.makedirs(LOGS_FOLDER)
 
 # System-Prompt für das LLM
-# Ersetze den SYSTEM_PROMPT in llm_integration.py mit diesem verbesserten Prompt
-
 SYSTEM_PROMPT = """
 Du bist ein hilfreicher Assistent für eine Kaffeemaschine. Deine Aufgabe ist es, Anfragen von Nutzern zu verstehen und ihnen zu helfen, einen leckeren Kaffee zuzubereiten.
 
@@ -80,122 +72,133 @@ Antworte in natürlicher, freundlicher Sprache auf Deutsch, als wärst du eine h
 Gestalte die Konversation flüssig und natürlich, ohne künstlich zu wirken.
 """
 
-# LLM-Interfaces und Implementierungen
+
+# Basisklasse für LLM-Interfaces
 class LLMInterface:
     def process_prompt(self, prompt, system_prompt=None):
         """Verarbeitet einen Prompt und gibt eine Antwort zurück"""
         raise NotImplementedError("Subklassen müssen diese Methode implementieren")
 
 
-class TogetherLLM(LLMInterface):
-    def __init__(self, model_name="togethercomputer/llama-3-8b-instruct"):
+# OpenRouter Implementation mit OpenAI SDK
+class OpenRouterLLM(LLMInterface):
+    def __init__(self, model_name="meta-llama/llama-3-8b-instruct:free", is_free=True):
+        """
+        Initialisiert die OpenRouter API mit dem OpenAI SDK.
+
+        Args:
+            model_name (str): Der vollständige Modellname bei OpenRouter
+            is_free (bool): Zeigt an, ob das Modell kostenlos ist
+        """
         self.model_name = model_name
-        self.api_key = "YOUR_API_KEY"  # Besser aus Umgebungsvariablen laden
-        self.base_url = "https://api.together.xyz/v1/completions"
-        print(f"Together.ai LLM für {model_name} initialisiert")
+        self.is_free = is_free
+        self.api_key = os.getenv("OPENROUTER_API_KEY", "")
 
-    def process_prompt(self, prompt, system_prompt=SYSTEM_PROMPT):
-        try:
-            import requests
-
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-
-            data = {
-                "model": self.model_name,
-                "prompt": f"{system_prompt}\n\n{prompt}",
-                "max_tokens": 1024,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "top_k": 50,
-                "repetition_penalty": 1.0,
-                "stop": ["</s>", "Human:", "human:", "Assistant:", "assistant:"]
-            }
-
-            response = requests.post(self.base_url, headers=headers, json=data)
-            response.raise_for_status()
-
-            result = response.json()
-            return result['choices'][0]['text'].strip()
-        except Exception as e:
-            print(f"Fehler bei der Anfrage an Together.ai: {e}")
-            return f"Entschuldigung, bei der Verarbeitung mit {self.model_name} ist ein Fehler aufgetreten: {e}"
-
-
-class FLANT5LLM(LLMInterface):
-    def __init__(self, model_name="google/flan-t5-base"):
-        try:
-            self.tokenizer = T5Tokenizer.from_pretrained(model_name)
-            self.model = T5ForConditionalGeneration.from_pretrained(model_name)
-            if torch.cuda.is_available():
-                self.model = self.model.to("cuda")
-            print(f"FLAN-T5 Modell {model_name} erfolgreich geladen")
-        except Exception as e:
-            print(f"Fehler beim Laden des FLAN-T5 Modells: {e}")
-            self.tokenizer = None
-            self.model = None
-
-    def process_prompt(self, prompt, system_prompt=None):
-        if not self.tokenizer or not self.model:
-            return "FLAN-T5 Modell konnte nicht geladen werden."
-
-        try:
-            # Kombiniere System-Prompt und Benutzer-Prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-            else:
-                full_prompt = prompt
-
-            # Tokenisiere und generiere
-            inputs = self.tokenizer(full_prompt, return_tensors="pt", max_length=512, truncation=True)
-            if torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
-
-            outputs = self.model.generate(**inputs, max_length=150)
-
-            # Dekodiere die Ausgabe
-            result = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return result
-        except Exception as e:
-            print(f"Fehler bei der Verarbeitung mit FLAN-T5: {e}")
-            return f"Entschuldigung, bei der Verarbeitung mit FLAN-T5 ist ein Fehler aufgetreten: {e}"
-
-
-class MockLLM(LLMInterface):
-    """Ein Mock-LLM für Godel, da es nicht direkt verfügbar ist"""
-
-    def __init__(self, model_name="godel"):
-        self.model_name = model_name
-        print(f"Mock-LLM für {model_name} initialisiert")
-
-    def process_prompt(self, prompt, system_prompt=None):
-        # Eine einfache Simulation von Godel-Antworten
-        if "greeting" in prompt.lower():
-            return "Hallo! Ich bin der Godel-Assistent für deine Kaffeemaschine. Wie kann ich dir helfen?"
-        elif "type" in prompt.lower() and "focus" in prompt.lower():
-            return "Welche Kaffeesorte möchtest du heute genießen? Ich kann dir Espresso, Cappuccino, Americano oder Latte Macchiato zubereiten."
-        elif "strength" in prompt.lower() and "focus" in prompt.lower():
-            return "Wie stark soll dein Kaffee sein? Du kannst zwischen sehr mild, mild, normal, stark, sehr stark oder einem Double Shot wählen."
-        elif "quantity" in prompt.lower() and "focus" in prompt.lower():
-            return "Wie viel Kaffee möchtest du? Die verfügbare Menge hängt von der gewählten Kaffeesorte ab."
-        elif "temp" in prompt.lower() and "focus" in prompt.lower():
-            return "Welche Temperatur bevorzugst du für deinen Kaffee? Normal, hoch oder sehr hoch?"
-        elif "production" in prompt.lower() and "ready" in prompt.lower():
-            return "Dein Kaffee ist fertig! Viel Genuss!"
+        if not self.api_key:
+            print("WARNUNG: OPENROUTER_API_KEY nicht gesetzt!")
+            self.client = None
+            self.client_available = False
         else:
-            return f"Ich habe deine Anfrage verstanden. Als Godel-Assistent würde ich dir bei der Kaffeezubereitung helfen. Du hast Folgendes angefragt: {prompt}"
+            try:
+                # Importiere OpenAI SDK
+                from openai import OpenAI
+
+                # Initialisiere den Client mit OpenRouter base_url
+                self.client = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=self.api_key,
+                )
+
+                self.client_available = True
+                print(f"OpenRouter API für {model_name} erfolgreich initialisiert")
+            except ImportError:
+                print("WARNUNG: 'openai' Paket nicht installiert. Führen Sie 'pip install openai' aus.")
+                self.client = None
+                self.client_available = False
+            except Exception as e:
+                print(f"Fehler bei der Initialisierung der OpenRouter API: {e}")
+                self.client = None
+                self.client_available = False
+
+    def process_prompt(self, prompt, system_prompt=None):
+        """Verarbeitet einen Prompt mit der OpenRouter API"""
+        if not self.client_available:
+            return self._fallback_response(prompt)
+
+        try:
+            messages = []
+
+            # Füge System-Prompt hinzu, wenn vorhanden
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+
+            # Füge Benutzer-Prompt hinzu
+            messages.append({"role": "user", "content": prompt})
+
+            # Erstelle die Anfrage mit zusätzlichen Headers für OpenRouter
+            completion = self.client.chat.completions.create(
+                extra_headers={
+                    "HTTP-Referer": "https://kaffee-assistant.de",  # Kann angepasst werden
+                    "X-Title": "Kaffee-Assistent",  # Name deiner Anwendung
+                },
+                model=self.model_name,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=800
+            )
+
+            # Extrahiere und gib die Antwort zurück
+            return completion.choices[0].message.content
+
+        except Exception as e:
+            print(f"Fehler bei der Anfrage an OpenRouter API mit Modell {self.model_name}: {e}")
+            return self._fallback_response(prompt)
+
+    def _fallback_response(self, prompt):
+        """Fallback-Antwort falls die Generierung fehlschlägt"""
+        # Gleiche Fallback-Logik wie in den anderen LLM-Klassen
+        if "greeting" in prompt.lower():
+            return "Hallo! Ich bin dein Kaffee-Assistent. Wie kann ich dir heute helfen? Möchtest du einen leckeren Kaffee zubereiten?"
+
+        elif "wandke_choose_type" in prompt.lower() and "in focus" in prompt.lower():
+            return "Welche Art von Kaffee möchtest du? Ich biete Espresso, Cappuccino, Americano oder Latte Macchiato an."
+
+        elif "wandke_choose_strength" in prompt.lower() and "in focus" in prompt.lower():
+            return "Wie stark soll dein Kaffee sein? Du kannst zwischen very mild, mild, normal, stark, sehr stark oder einem Double Shot wählen."
+
+        elif "wandke_choose_quantity" in prompt.lower() and "in focus" in prompt.lower():
+            if "Espresso" in prompt:
+                return "Wie viel Espresso möchtest du? Du kannst zwischen 35ml und 60ml wählen."
+            elif "Cappuccino" in prompt:
+                return "Wie viel Cappuccino möchtest du? Du kannst zwischen 100ml und 300ml wählen."
+            elif "Americano" in prompt:
+                return "Wie viel Americano möchtest du? Du kannst zwischen 100ml und 300ml wählen."
+            elif "Latte" in prompt:
+                return "Wie viel Latte Macchiato möchtest du? Du kannst zwischen 200ml und 400ml wählen."
+            else:
+                return "Wie viel Kaffee möchtest du? Die verfügbare Menge hängt von der gewählten Kaffeesorte ab."
+
+        elif "wandke_choose_temp" in prompt.lower() and "in focus" in prompt.lower():
+            return "Welche Temperatur bevorzugst du für deinen Kaffee? Du kannst zwischen normal, hoch und sehr hoch wählen."
+
+        elif "wandke_production_state" in prompt.lower() and "ready" in prompt.lower():
+            return "Dein Kaffee ist fertig! Genieße deinen Kaffee. War sonst noch etwas?"
+
+        else:
+            return "Ich verstehe deine Anfrage. Wie kann ich dir mit deinem Kaffee helfen?"
 
 
+# LLM Manager für mehrere APIs, alle über OpenRouter
 class LLMManager:
     def __init__(self):
+        # Aktualisiere den OpenChat-Modellnamen und füge ein neues Modell hinzu
         self.llms = {
-            "llama3": TogetherLLM(model_name="togethercomputer/llama-3-8b-instruct"),
-            "godel": MockLLM(model_name="godel"),
-            "flant5": FLANT5LLM()
+            # OpenRouter Modelle (kostenlos)
+            "llama3-8b": OpenRouterLLM(model_name="meta-llama/llama-3-8b-instruct:free"),
+            "phi3-mini": OpenRouterLLM(model_name="microsoft/phi-3-mini-128k-instruct:free"),  # Phi-3-Mini statt Medium
+            "openchat-3.5": OpenRouterLLM(model_name="openchat/openchat-7b:free")
         }
-        self.current_llm = "llama3"  # Standard-LLM
+        self.current_llm = "llama3-8b"  # Standard-LLM
 
     def set_current_llm(self, llm_name):
         if llm_name in self.llms:
@@ -203,17 +206,65 @@ class LLMManager:
             return True
         return False
 
-    def process_prompt(self, prompt, system_prompt=SYSTEM_PROMPT):
+    def process_prompt(self, prompt, system_prompt=None):
         try:
-            return self.llms[self.current_llm].process_prompt(prompt, system_prompt)
+            # Versuche, die Anfrage mit dem aktuellen LLM zu verarbeiten
+            result = self.llms[self.current_llm].process_prompt(prompt, system_prompt)
+
+            # Überprüfe, ob das Ergebnis Fehler oder seltsame Formatierungen enthält
+            if "role" in result or "user_choice" in result or result.strip().startswith(
+                    "{") or result.strip().startswith("["):
+                print(f"Fehlerhafte Antwort vom Modell {self.current_llm}, verwende Fallback")
+                return self._fallback_response(prompt)
+
+            return result
         except Exception as e:
             print(f"Fehler bei der Verarbeitung mit {self.current_llm}: {e}")
-            return f"Entschuldigung, beim Verarbeiten mit {self.current_llm} ist ein Fehler aufgetreten: {e}"
+            # Versuche, auf Llama 3 zurückzufallen, wenn ein anderes Modell fehlschlägt
+            if self.current_llm != "llama3-8b":
+                try:
+                    print(f"Versuche Fallback auf Llama 3 8B...")
+                    return self.llms["llama3-8b"].process_prompt(prompt, system_prompt)
+                except Exception as fallback_error:
+                    print(f"Auch Fallback auf Llama 3 fehlgeschlagen: {fallback_error}")
+
+            return self._fallback_response(prompt)
+
+    def _fallback_response(self, prompt):
+        """Fallback-Antwort falls alle LLMs fehlschlagen"""
+        if "greeting" in prompt.lower():
+            return "Hallo! Ich bin dein Kaffee-Assistent. Wie kann ich dir heute helfen? Möchtest du einen leckeren Kaffee zubereiten?"
+
+        elif "wandke_choose_type" in prompt.lower() and "in focus" in prompt.lower():
+            return "Welche Art von Kaffee möchtest du? Ich biete Espresso, Cappuccino, Americano oder Latte Macchiato an."
+
+        elif "wandke_choose_strength" in prompt.lower() and "in focus" in prompt.lower():
+            return "Wie stark soll dein Kaffee sein? Du kannst zwischen very mild, mild, normal, stark, sehr stark oder einem Double Shot wählen."
+
+        elif "wandke_choose_quantity" in prompt.lower() and "in focus" in prompt.lower():
+            if "Espresso" in prompt:
+                return "Wie viel Espresso möchtest du? Du kannst zwischen 35ml und 60ml wählen."
+            elif "Cappuccino" in prompt:
+                return "Wie viel Cappuccino möchtest du? Du kannst zwischen 100ml und 300ml wählen."
+            elif "Americano" in prompt:
+                return "Wie viel Americano möchtest du? Du kannst zwischen 100ml und 300ml wählen."
+            elif "Latte" in prompt:
+                return "Wie viel Latte Macchiato möchtest du? Du kannst zwischen 200ml und 400ml wählen."
+            else:
+                return "Wie viel Kaffee möchtest du? Die verfügbare Menge hängt von der gewählten Kaffeesorte ab."
+
+        elif "wandke_choose_temp" in prompt.lower() and "in focus" in prompt.lower():
+            return "Welche Temperatur bevorzugst du für deinen Kaffee? Du kannst zwischen normal, hoch und sehr hoch wählen."
+
+        elif "wandke_production_state" in prompt.lower() and "ready" in prompt.lower():
+            return "Dein Kaffee ist fertig! Genieße deinen Kaffee. War sonst noch etwas?"
+
+        else:
+            return "Ich verstehe deine Anfrage. Wie kann ich dir mit deinem Kaffee helfen?"
 
 
-# Initialisiere den LLM-Manager als globale Variable
+# Erstelle den LLM-Manager
 llm_manager = LLMManager()
-
 
 # Funktion zum Loggen von Benutzeraktivitäten
 def log_user_activity(activity_type, user_data=None):
@@ -236,18 +287,7 @@ def log_user_activity(activity_type, user_data=None):
         print(f"Fehler beim Loggen der Benutzeraktivität: {e}")
 
 
-def init_llm_client():
-    """Initialisiere den LLM-Client"""
-    global llm_client
-    try:
-        llm_client = Client(host=LLM_HOST)
-        print("LLM-Client erfolgreich initialisiert")
-        return True
-    except Exception as e:
-        print(f"Fehler beim Initialisieren des LLM-Clients: {e}")
-        return False
-
-
+# Verbesserte start_bot_process-Funktion für llm_integration.py
 def start_bot_process():
     """Startet den Bot-Prozess und richtet die Kommunikation ein"""
     global decision_tree_pipe, bot_process, listen_thread
@@ -273,8 +313,16 @@ def start_bot_process():
         bot_process.daemon = True  # Prozess wird beendet, wenn Hauptprozess endet
         bot_process.start()
 
+        # Kurze Pause, um den Bot-Prozess zu initialisieren
+        time.sleep(0.5)
+
+        # Prüfe, ob der Prozess gestartet ist
+        if not bot_process.is_alive():
+            print("WARNUNG: Bot-Prozess wurde gestartet, scheint aber nicht zu laufen!")
+            return False
+
         # Verwalte die Hör-Threads
-        if 'listen_thread' in globals() and listen_thread is not None and listen_thread.is_alive():
+        if listen_thread is not None and listen_thread.is_alive():
             print("Bestehender Listen-Thread läuft bereits")
         else:
             print("Starte neuen Listen-Thread")
@@ -283,57 +331,682 @@ def start_bot_process():
             listen_thread.start()
 
         print(f"Bot-Prozess (PID {bot_process.pid}) und Kommunikation gestartet")
+
+        # Optional: Begrüßungsnachricht direkt senden, um die Kommunikation zu initiieren
+        try:
+            greeting_message = {"communicative_intent": "greeting"}
+            decision_tree_pipe.send(json.dumps(greeting_message))
+            print("Begrüßungsnachricht an den Bot gesendet")
+        except Exception as greeting_error:
+            print(f"Fehler beim Senden der Begrüßungsnachricht: {greeting_error}")
+
         return True
     except Exception as e:
         print(f"Fehler beim Starten des Bot-Prozesses: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
-def json_to_llm_prompt(json_data):
-    """Konvertiert JSON-Daten in einen Prompt für das LLM"""
+# Diese Funktion in llm_integration.py ersetzen
+
+def update_machine_state_from_user_selection(json_data):
+    """Aktualisiert den machine_state direkt basierend auf der Benutzereingabe"""
+    global machine_state
+
     try:
-        data = json.loads(json_data) if isinstance(json_data, str) else json_data
+        # Direkte Aktualisierung aus dem JSON
+        if isinstance(json_data, dict):
+            if "type" in json_data and json_data["type"]:
+                machine_state["type"] = json_data["type"]
+                print(f"Machine state direkt aktualisiert: type = {json_data['type']}")
 
-        # Informationen aus dem JSON extrahieren
-        intent = data.get("communicative_intent", "")
+            if "strength" in json_data and json_data["strength"]:
+                machine_state["strength"] = json_data["strength"]
+                print(f"Machine state direkt aktualisiert: strength = {json_data['strength']}")
 
-        prompt = f"Die Kaffeemaschine sendet folgende Informationen: {json.dumps(data, indent=2, ensure_ascii=False)}\n\n"
+            if "temp" in json_data and json_data["temp"]:
+                machine_state["temp"] = json_data["temp"]
+                print(f"Machine state direkt aktualisiert: temp = {json_data['temp']}")
 
-        # Je nach Intent unterschiedliche Anweisungen hinzufügen
-        if intent == "greeting":
-            prompt += "Begrüße den Nutzer freundlich und frage, welchen Kaffee er möchte."
-
-        elif intent == "request_information":
-            if data.get("wandke_choose_type") == "in focus":
-                prompt += "Frage den Nutzer, welchen Kaffeetyp er gerne hätte. Liste die verfügbaren Optionen auf."
-            elif data.get("wandke_choose_strength") == "in focus":
-                prompt += "Frage den Nutzer, wie stark der Kaffee sein soll. Erkläre die verfügbaren Optionen."
-            elif data.get("wandke_choose_quantity") == "in focus":
-                prompt += "Frage den Nutzer, wie viel Kaffee er möchte. Wenn der Kaffeetyp bereits gewählt wurde, nenne den passenden Mengenbereich."
-            elif data.get("wandke_choose_temp") == "in focus":
-                prompt += "Frage den Nutzer, wie heiß der Kaffee sein soll. Erkläre die verfügbaren Temperaturoptionen."
-            elif data.get("wandke_production_state") == "in focus":
-                prompt += "Frage den Nutzer, ob die Kaffeezubereitung gestartet werden soll."
-
-        elif intent == "inform":
-            # Bei Diagnosen wie 'UserRequestedValueTooLowForType' oder 'TypeNotYetSpecified'
-            if data.get("wandke_choose_quantity") in ["UserRequestedValueTooLowForType",
-                                                      "UserRequestedValueTooHighForType"]:
-                prompt += "Erkläre dem Nutzer freundlich, dass die gewählte Menge nicht zum Kaffeetyp passt. Nenne die passenden Mengenbereiche."
-            elif data.get("wandke_choose_quantity") == "TypeNotYetSpecified":
-                prompt += "Erkläre dem Nutzer, dass zuerst ein Kaffeetyp gewählt werden muss, bevor die Menge festgelegt werden kann."
-            elif data.get("wandke_production_state") == "ready":
-                prompt += "Teile dem Nutzer mit, dass der Kaffee fertig zubereitet wird."
-            elif any(key in data for key in ["type", "strength", "temp", "quantity"]):
-                prompt += "Bestätige die vom Nutzer gewählte Einstellung und frage nach der nächsten Einstellung, falls noch nicht alle gewählt wurden."
-
-        prompt += "\n\nFormuliere eine natürliche, freundliche Antwort auf Deutsch, die die Kaffeemaschine sagen würde:"
-        return prompt
-
+            if "quantity" in json_data and json_data["quantity"]:
+                machine_state["quantity"] = json_data["quantity"]
+                print(f"Machine state direkt aktualisiert: quantity = {json_data['quantity']}")
     except Exception as e:
-        print(f"Fehler bei der Umwandlung von JSON zu Prompt: {e}")
-        return f"Antworte auf die Nachricht vom Nutzer als freundliche Kaffeemaschine. JSON-Daten: {json_data}"
+        print(f"Fehler bei direkter Aktualisierung des machine_state: {e}")
 
+
+def is_start_command(message):
+    """Prüft, ob eine Nachricht ein Startbefehl für die Kaffeezubereitung ist"""
+    start_commands = ["ja", "starten", "start", "kaffee machen", "kaffee starten",
+                      "los", "machen", "beginnen", "zubereiten", "ok"]
+
+    # Nachricht normalisieren (Kleinbuchstaben, Leerzeichen entfernen)
+    message_lower = message.lower().strip()
+
+    # Prüfen auf exakte Übereinstimmung oder als Teil der Nachricht
+    return any(cmd == message_lower or cmd in message_lower.split() for cmd in start_commands)
+
+
+def process_user_message(message):
+    """Verarbeitet eine Nachricht vom Benutzer und leitet sie an den Entscheidungsbaum weiter"""
+    global decision_tree_pipe, conversation_context, machine_state
+    try:
+        # Sende sofort eine Statusmeldung, dass die Verarbeitung beginnt (für UI)
+        socketio.emit(
+            "processing_status",
+            {
+                "type": "llm_json",
+                "status": "started"
+            }
+        )
+
+        # Nachricht zum Kontext hinzufügen
+        conversation_context.append({
+            "role": "user",
+            "content": message
+        })
+
+        # Bestimme den aktuellen Fokus basierend auf dem letzten Zustand des Entscheidungsbaums
+        current_focus = None
+        if len(conversation_context) > 1 and len(message_queue) > 0 and "raw_json" in message_queue[-1]:
+            try:
+                last_message = json.loads(message_queue[-1]["raw_json"])
+                if "wandke_choose_type" in last_message and last_message["wandke_choose_type"] == "in focus":
+                    current_focus = "type"
+                elif "wandke_choose_strength" in last_message and last_message["wandke_choose_strength"] == "in focus":
+                    current_focus = "strength"
+                elif "wandke_choose_quantity" in last_message and last_message["wandke_choose_quantity"] == "in focus":
+                    current_focus = "quantity"
+                elif "wandke_choose_temp" in last_message and last_message["wandke_choose_temp"] == "in focus":
+                    current_focus = "temp"
+                elif "wandke_production_state" in last_message and last_message[
+                    "wandke_production_state"] == "in focus":
+                    current_focus = "production"
+            except Exception as e:
+                print(f"Fehler beim Extrahieren des aktuellen Fokus: {e}")
+
+        print(f"Aktueller Fokus des Entscheidungsbaums: {current_focus or 'unbekannt'}")
+
+        # NEUE LOGIK: Direkte Erkennung von Startbefehlen für den Produktionsstatus
+        if current_focus == "production" and is_start_command(message):
+            print(f"Startbefehl erkannt: '{message}' - Starte Kaffeezubereitung direkt")
+            json_data = {
+                "communicative_intent": "inform",
+                "wandke_production_state": "started"
+            }
+
+            # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+            socketio.emit(
+                "processing_status",
+                {
+                    "type": "llm_json",
+                    "status": "completed"
+                }
+            )
+
+            # Sende eine Statusmeldung, dass der Entscheidungsbaum startet
+            socketio.emit(
+                "processing_status",
+                {
+                    "type": "decision_tree",
+                    "status": "started"
+                }
+            )
+
+            # Drucke das JSON für Debug-Zwecke
+            print(f"Sende direkt an Entscheidungsbaum: {json_data}")
+
+            # Senden der Nachricht an den Entscheidungsbaum
+            decision_tree_pipe.send(json.dumps(json_data))
+            return True
+
+        # Überprüfe, ob es sich wahrscheinlich um eine Nachfrage handelt
+        message_lower = message.lower()
+        is_question = False
+        question_indicators = ["was", "wie", "welche", "wann", "wo", "warum", "wieso", "wer", "?", "unterschied",
+                               "bedeutet", "erkläre", "nochmal", "gibt es", "zeige", "nenne", "liste", "optionen",
+                               "verfügbar"]
+
+        for indicator in question_indicators:
+            if indicator in message_lower:
+                is_question = True
+                break
+
+        # VERBESSERT: Checke auch nach Stärken, Mengen oder Temperatur-Begriffen
+        info_request_keywords = {
+            "strength": ["stärke", "stark", "mild", "intensiv", "double shot", "kräftig"],
+            "quantity": ["menge", "milliliter", "ml", "groß", "klein", "viel", "wenig"],
+            "temp": ["temperatur", "heiß", "kalt", "warm", "grad"],
+            "type": ["sorte", "kaffee", "espresso", "cappuccino", "americano", "latte", "macchiato"]
+        }
+
+        # Prüfen ob bestimmte Informationen angefragt werden
+        requested_info_type = None
+        for info_type, keywords in info_request_keywords.items():
+            if any(keyword in message_lower for keyword in keywords):
+                if is_question:  # Kombiniere mit Frageindikatoren für mehr Präzision
+                    requested_info_type = info_type
+                    break
+
+        # NEU: Prüfe auf direkte Wertangaben bei aktuellem Fokus
+        is_direct_value = False
+        direct_value = None
+
+        if current_focus == "strength":
+            strength_values = ["very mild", "mild", "normal", "strong", "very strong", "double shot", "double shot +",
+                               "double shot ++"]
+            for value in strength_values:
+                if value.lower() == message_lower or (value.lower() == "normal" and "normal" in message_lower):
+                    is_direct_value = True
+                    direct_value = value
+                    break
+
+        elif current_focus == "temp":
+            temp_values = ["normal", "high", "very high"]
+            for value in temp_values:
+                if value.lower() in message_lower:
+                    is_direct_value = True
+                    direct_value = value
+                    break
+
+        elif current_focus == "type":
+            type_values = ["Espresso", "Cappuccino", "Americano", "Latte Macchiato"]
+            for value in type_values:
+                if value.lower() in message_lower:
+                    is_direct_value = True
+                    direct_value = value
+                    break
+                # Zusätzliche Prüfung für Tippfehler
+                elif value.lower().startswith(message_lower) or message_lower.startswith(value.lower()):
+                    is_direct_value = True
+                    direct_value = value
+                    break
+
+        # Für Mengenangaben - numerische Werte
+        elif current_focus == "quantity":
+            import re
+            quantity_match = re.search(r'(\d+)', message_lower)
+            if quantity_match:
+                is_direct_value = True
+                direct_value = quantity_match.group(1)
+
+        # Wenn eine direkte Wertangabe erkannt wurde, erstelle ein entsprechendes JSON
+        if is_direct_value and direct_value and not is_question:
+            print(f"Direkte Wertangabe erkannt: {direct_value} für {current_focus}")
+            json_data = {"communicative_intent": "inform"}
+
+            if current_focus == "type":
+                json_data["type"] = direct_value
+                json_data["wandke_choose_type"] = "NoDiagnosis"
+                machine_state["type"] = direct_value  # Direkte Aktualisierung
+                print(f"Machine state direkt aktualisiert: type = {direct_value}")
+            elif current_focus == "strength":
+                json_data["strength"] = direct_value
+                json_data["wandke_choose_strength"] = "NoDiagnosis"
+                machine_state["strength"] = direct_value  # Direkte Aktualisierung
+                print(f"Machine state direkt aktualisiert: strength = {direct_value}")
+            elif current_focus == "temp":
+                json_data["temp"] = direct_value
+                json_data["wandke_choose_temp"] = "NoDiagnosis"
+                machine_state["temp"] = direct_value  # Direkte Aktualisierung
+                print(f"Machine state direkt aktualisiert: temp = {direct_value}")
+            elif current_focus == "quantity":
+                json_data["quantity"] = direct_value
+                json_data["wandke_choose_quantity"] = "NoDiagnosis"
+                machine_state["quantity"] = direct_value  # Direkte Aktualisierung
+                print(f"Machine state direkt aktualisiert: quantity = {direct_value}")
+
+            # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+            socketio.emit(
+                "processing_status",
+                {
+                    "type": "llm_json",
+                    "status": "completed"
+                }
+            )
+
+            # Sende eine Statusmeldung, dass der Entscheidungsbaum startet (für UI)
+            socketio.emit(
+                "processing_status",
+                {
+                    "type": "decision_tree",
+                    "status": "started"
+                }
+            )
+
+            # Drucke das endgültige JSON für Debug-Zwecke
+            print(f"Sende an Entscheidungsbaum: {json_data}")
+
+            # Senden der Nachricht an den Entscheidungsbaum
+            decision_tree_pipe.send(json.dumps(json_data))
+            return True
+
+        # VERBESSERT: Direktere Behandlung von Informationsanfragen
+        if is_question:
+            # Wenn der Benutzer fragt "Was sind nochmal alle stärken" und wir sind im strength Fokus
+            if requested_info_type and current_focus and requested_info_type == current_focus:
+                # Erstelle eine detaillierte Informationsantwort für den aktuellen Fokus
+                info_json = {"communicative_intent": "request_information"}
+                if current_focus == "type":
+                    info_json["wandke_choose_type"] = "in focus"
+                elif current_focus == "strength":
+                    info_json["wandke_choose_strength"] = "in focus"
+                elif current_focus == "temp":
+                    info_json["wandke_choose_temp"] = "in focus"
+                elif current_focus == "quantity":
+                    info_json["wandke_choose_quantity"] = "in focus"
+
+                print(
+                    f"Erkannte Informationsanfrage über {requested_info_type} im aktuellen Fokus, generiere LLM-Antwort")
+
+                # Generiere eine maßgeschneiderte LLM-Antwort
+                llm_info_prompt = create_info_prompt(current_focus, machine_state)
+                detailed_info = llm_manager.process_prompt(llm_info_prompt, SYSTEM_PROMPT)
+
+                # Erstelle eine einzigartige ID für die Nachricht
+                message_id = int(time.time() * 1000)
+
+                # Sende die Antwort direkt als Chat-Nachricht
+                socketio.emit("chat_message", {
+                    "sender": "assistant",
+                    "message": detailed_info,
+                    "id": message_id
+                })
+
+                # Füge die Nachricht zum Verlauf hinzu
+                message_queue.append({
+                    "sender": "assistant",
+                    "message": detailed_info,
+                    "raw_json": json.dumps(info_json),
+                    "id": message_id
+                })
+
+                # Füge die Antwort zum Konversationskontext hinzu
+                conversation_context.append({
+                    "role": "assistant",
+                    "content": detailed_info
+                })
+
+                # Signalisiere, dass die Verarbeitung abgeschlossen ist
+                socketio.emit(
+                    "processing_status",
+                    {
+                        "type": "llm_json",
+                        "status": "completed"
+                    }
+                )
+
+                socketio.emit(
+                    "processing_status",
+                    {
+                        "type": "decision_tree",
+                        "status": "completed"
+                    }
+                )
+
+                # Stelle nach kurzer Pause den ursprünglichen Fokus wieder her
+                time.sleep(0.5)
+                refocus_json = {"communicative_intent": "request_information"}
+                if current_focus == "type":
+                    refocus_json["wandke_choose_type"] = "in focus"
+                elif current_focus == "strength":
+                    refocus_json["wandke_choose_strength"] = "in focus"
+                elif current_focus == "temp":
+                    refocus_json["wandke_choose_temp"] = "in focus"
+                elif current_focus == "quantity":
+                    refocus_json["wandke_choose_quantity"] = "in focus"
+
+                # Direkt an den Entscheidungsbaum senden
+                print(f"Stelle ursprünglichen Fokus wieder her: {refocus_json}")
+                decision_tree_pipe.send(json.dumps(refocus_json))
+                return True
+
+            elif requested_info_type:
+                # Wir haben eine Informationsanfrage zu einem anderen Parameter als dem aktuellen Fokus
+                json_data = {"communicative_intent": "request_information"}
+                if requested_info_type == "type":
+                    json_data["wandke_choose_type"] = "in focus"
+                elif requested_info_type == "strength":
+                    json_data["wandke_choose_strength"] = "in focus"
+                elif requested_info_type == "temp":
+                    json_data["wandke_choose_temp"] = "in focus"
+                elif requested_info_type == "quantity":
+                    json_data["wandke_choose_quantity"] = "in focus"
+
+                print(f"Erkannte Informationsanfrage über {requested_info_type}, verwende JSON: {json_data}")
+            elif current_focus:
+                # Anfrage im aktuellen Fokus ohne spezifischen Typ
+                json_data = {"communicative_intent": "request_information"}
+                if current_focus == "type":
+                    json_data["wandke_choose_type"] = "in focus"
+                elif current_focus == "strength":
+                    json_data["wandke_choose_strength"] = "in focus"
+                elif current_focus == "temp":
+                    json_data["wandke_choose_temp"] = "in focus"
+                elif current_focus == "quantity":
+                    json_data["wandke_choose_quantity"] = "in focus"
+                elif current_focus == "production":
+                    json_data["wandke_production_state"] = "in focus"
+
+                print(f"Allgemeine Informationsanfrage im aktuellen Fokus: {current_focus}, verwende JSON: {json_data}")
+            else:
+                # Allgemeine Anfrage ohne bekannten Fokus
+                json_data = {"communicative_intent": "request_information"}
+                print("Allgemeine Informationsanfrage ohne Fokus")
+        else:
+            # Nicht-Frage-Nachricht: Standard-LLM-Verarbeitung für Auswahlen
+
+            # Ein klarer Prompt für das LLM
+            interpretation_prompt = f"""
+            Du bist ein Interpret für einen Kaffee-Assistenten. Deine Aufgabe ist es, Benutzernachrichten in JSON-Befehle für den Entscheidungsbaum zu übersetzen.
+
+            AKTUELLER KONTEXT:
+            - Die Kaffeemaschine fragt gerade nach: {current_focus or "unbekannt"}
+            - Aktueller Status: Typ: {machine_state["type"] or "nicht gewählt"}, Stärke: {machine_state["strength"] or "nicht gewählt"}, Temperatur: {machine_state["temp"] or "nicht gewählt"}, Menge: {machine_state["quantity"] or "nicht gewählt"}
+
+            BENUTZERNACHRICHT:
+            "{message}"
+
+            WICHTIG:
+            - Sei sehr tolerant bei Rechtschreibfehlern
+            - Bei unklaren Eingaben, berücksichtige den aktuellen Fokus der Kaffeemaschine
+            - Wenn der Text eine FRAGE ist (z.B. "Was sind die Stärken?"), erstelle ein Objekt mit:
+              {{"communicative_intent": "request_information"}}
+              und füge den aktuellen Fokus hinzu, z.B. "wandke_choose_strength": "in focus"
+            - Bei einer Auswahl (z.B. "Ich möchte einen Espresso"), erstelle ein Objekt mit:
+              {{"communicative_intent": "inform"}} und den entsprechenden Werten
+
+            GÜLTIGE WERTE:
+            - Kaffeetypen: "Espresso", "Cappuccino", "Americano", "Latte Macchiato"
+            - Stärken: "very mild", "mild", "normal", "strong", "very strong", "double shot", "double shot +", "double shot ++"
+            - Temperaturen: "normal", "high", "very high"
+            - Mengen: Numerische Werte in ml
+
+            AUSGABEFORMAT FÜR AUSWAHLEN:
+            - Bei Typ-Auswahl: {{"communicative_intent": "inform", "type": "ERKANNTER_TYP", "wandke_choose_type": "NoDiagnosis"}}
+            - Bei Stärke-Auswahl: {{"communicative_intent": "inform", "strength": "ERKANNTE_STÄRKE", "wandke_choose_strength": "NoDiagnosis"}}
+            - Bei Temperatur-Auswahl: {{"communicative_intent": "inform", "temp": "ERKANNTE_TEMPERATUR", "wandke_choose_temp": "NoDiagnosis"}}
+            - Bei Mengen-Auswahl: {{"communicative_intent": "inform", "quantity": "ERKANNTE_MENGE", "wandke_choose_quantity": "NoDiagnosis"}}
+            - Bei Startbefehl: {{"communicative_intent": "inform", "wandke_production_state": "started"}}
+
+            AUSGABEFORMAT FÜR FRAGEN/NACHFRAGEN:
+            - Bei Fragen zum Typ: {{"communicative_intent": "request_information", "wandke_choose_type": "in focus"}}
+            - Bei Fragen zur Stärke: {{"communicative_intent": "request_information", "wandke_choose_strength": "in focus"}}
+            - Bei Fragen zur Temperatur: {{"communicative_intent": "request_information", "wandke_choose_temp": "in focus"}}
+            - Bei Fragen zur Menge: {{"communicative_intent": "request_information", "wandke_choose_quantity": "in focus"}}
+            - Bei Fragen zur Produktion: {{"communicative_intent": "request_information", "wandke_production_state": "in focus"}}
+
+            BEISPIELE:
+            1. Bei "Ich möchte einen Espresso": {{"communicative_intent": "inform", "type": "Espresso", "wandke_choose_type": "NoDiagnosis"}}
+            2. Bei "Was sind die verschiedenen Stärken?": {{"communicative_intent": "request_information", "wandke_choose_strength": "in focus"}}
+            3. Bei "Welche Temperaturen gibt es?": {{"communicative_intent": "request_information", "wandke_choose_temp": "in focus"}}
+            4. Bei "Strong": {{"communicative_intent": "inform", "strength": "strong", "wandke_choose_strength": "NoDiagnosis"}}
+
+            Gib NUR das JSON-Objekt zurück, keinen anderen Text!
+            """
+
+            if current_focus:
+                interpretation_prompt += f"""
+
+                WICHTIGER HINWEIS:
+                Da der aktuelle Fokus "{current_focus}" ist, ist es wahrscheinlich, dass die Benutzereingabe "{message}" sich auf diesen Parameter bezieht.
+                """
+
+            # LLM-Antwort generieren
+            llm_response = llm_manager.process_prompt(interpretation_prompt)
+            print(f"LLM-Interpretation der Benutzereingabe: {llm_response}")
+
+            # Versuche, die LLM-Antwort als JSON zu parsen
+            try:
+                # Versuche zuerst mit der direkten Antwort
+                json_data = json.loads(llm_response)
+            except json.JSONDecodeError:
+                try:
+                    # Wenn die direkte Antwort kein valides JSON ist, versuche mit regex
+                    import re
+                    json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+                    if json_match:
+                        json_data = json.loads(json_match.group(0))
+                    else:
+                        # Wenn keine JSON-Struktur gefunden wurde, erstelle einen absoluten Fallback
+                        if current_focus:
+                            # Bei erkannten Werten im aktuellen Fokus
+                            if is_direct_value and direct_value:
+                                json_data = {"communicative_intent": "inform"}
+                                if current_focus == "type":
+                                    json_data["type"] = direct_value
+                                    json_data["wandke_choose_type"] = "NoDiagnosis"
+                                elif current_focus == "strength":
+                                    json_data["strength"] = direct_value
+                                    json_data["wandke_choose_strength"] = "NoDiagnosis"
+                                elif current_focus == "temp":
+                                    json_data["temp"] = direct_value
+                                    json_data["wandke_choose_temp"] = "NoDiagnosis"
+                                elif current_focus == "quantity":
+                                    json_data["quantity"] = direct_value
+                                    json_data["wandke_choose_quantity"] = "NoDiagnosis"
+                            else:
+                                # Verwende den aktuellen Fokus für Nachfragen
+                                json_data = {"communicative_intent": "request_information"}
+                                if current_focus == "type":
+                                    json_data["wandke_choose_type"] = "in focus"
+                                elif current_focus == "strength":
+                                    json_data["wandke_choose_strength"] = "in focus"
+                                elif current_focus == "temp":
+                                    json_data["wandke_choose_temp"] = "in focus"
+                                elif current_focus == "quantity":
+                                    json_data["wandke_choose_quantity"] = "in focus"
+                                elif current_focus == "production":
+                                    json_data["wandke_production_state"] = "in focus"
+                        else:
+                            # Allgemeiner Fallback
+                            json_data = {"communicative_intent": "request_information"}
+
+                        print(f"Konnte kein JSON aus LLM-Antwort extrahieren, verwende Fallback: {json_data}")
+                except Exception as parse_error:
+                    print(f"Fehler beim JSON-Parsing: {parse_error}")
+                    # Absoluter Fallback
+                    json_data = {"communicative_intent": "request_information"}
+
+        # Entferne alle Schlüssel mit None/null-Werten
+        if isinstance(json_data, dict):
+            json_data = {k: v for k, v in json_data.items() if v is not None}
+
+        update_machine_state_from_user_selection(json_data)
+
+        # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
+        socketio.emit(
+            "processing_status",
+            {
+                "type": "llm_json",
+                "status": "completed"
+            }
+        )
+
+        # Sende eine Statusmeldung, dass der Entscheidungsbaum startet (für UI)
+        socketio.emit(
+            "processing_status",
+            {
+                "type": "decision_tree",
+                "status": "started"
+            }
+        )
+
+        # Drucke das endgültige JSON für Debug-Zwecke
+        print(f"Sende an Entscheidungsbaum: {json_data}")
+
+        # Senden der Nachricht an den Entscheidungsbaum
+        decision_tree_pipe.send(json.dumps(json_data))
+        return True
+    except Exception as e:
+        print(f"Fehler bei der Verarbeitung der Benutzernachricht: {e}")
+        import traceback
+        traceback.print_exc()
+        # Informiere den Client über den Fehler (für UI)
+        socketio.emit(
+            "processing_status",
+            {
+                "type": "decision_tree",
+                "status": "error",
+                "error": str(e)
+            }
+        )
+        return False
+
+
+# Füge diese Hilfsfunktion hinzu
+def create_info_prompt(focus_type, machine_state):
+    """Erstellt einen Prompt für das LLM, um detaillierte Informationen zu einem Fokustyp zu liefern"""
+    if focus_type == "type":
+        return f"""
+        Der Benutzer fragt nach Informationen über die verfügbaren Kaffeetypen.
+
+        Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Kaffeetypen erklärt:
+        - Espresso: Ein kleiner, konzentrierter Kaffee mit intensivem Geschmack
+        - Cappuccino: Espresso mit aufgeschäumter Milch, cremig und ausgewogen
+        - Americano: Espresso mit heißem Wasser verlängert, ähnlich schwarzem Kaffee
+        - Latte Macchiato: Aufgeschäumte Milch mit Espresso, mild und cremig
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, detaillierte Antwort, die alle Kaffeetypen erklärt und ihre Unterschiede hervorhebt.
+        Wenn bereits ein Kaffeetyp gewählt wurde, erwähne dies in deiner Antwort und schlage vor, die Auswahl zu bestätigen oder zu ändern.
+        """
+
+    elif focus_type == "strength":
+        return f"""
+        Der Benutzer fragt nach Informationen über die verfügbaren Kaffeestärken.
+
+        Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Stärken erklärt:
+        - very mild: Sehr mild und dezent, für einen sanften Kaffeegenuss
+        - mild: Leicht und sanft, aber etwas intensiver als very mild
+        - normal: Ausgewogene Stärke, Standard für die meisten Kaffeetrinker
+        - strong: Kräftig und intensiv, für Liebhaber von stärkerem Kaffee
+        - very strong: Besonders kräftig, mit vollem Körper und intensivem Geschmack
+        - double shot: Mit doppelter Kaffeemenge für Extra-Intensität
+        - double shot +: Noch intensiverer doppelter Schuss
+        - double shot ++: Maximale Intensität mit doppeltem Schuss
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, detaillierte Antwort, die alle Stärkegrade erklärt und ihre Unterschiede hervorhebt. 
+        Wenn bereits eine Stärke gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+        """
+
+    elif focus_type == "temp":
+        return f"""
+        Der Benutzer fragt nach Informationen über die verfügbaren Temperaturen.
+
+        Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Temperaturen detailliert erklärt:
+        - normal: Standardtemperatur (ca. 85-90°C), angenehm heiß für die meisten Kaffeetrinker
+        - high: Erhöhte Temperatur (ca. 90-95°C), für Liebhaber von heißerem Kaffee
+        - very high: Maximale Temperatur (ca. 95-98°C), für besonders heiße Getränke
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, ausführliche Antwort, die alle Temperaturoptionen erklärt und ihre Unterschiede und Auswirkungen auf den Geschmack hervorhebt.
+        Wenn bereits eine Temperatur gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+        """
+
+    elif focus_type == "quantity":
+        type_specific = ""
+        if machine_state["type"] == "Espresso":
+            type_specific = """
+            Für Espresso wird üblicherweise eine Menge zwischen 35ml und 60ml empfohlen:
+            - 35ml für einen sehr konzentrierten, intensiven Espresso (Ristretto-Stil)
+            - 45ml für einen klassischen Espresso (Standard)
+            - 60ml für einen längeren Espresso (Lungo-Stil)
+            """
+        elif machine_state["type"] == "Cappuccino":
+            type_specific = """
+            Für Cappuccino kannst du eine Menge zwischen 100ml und 300ml wählen:
+            - 100-150ml für einen kleinen, intensiven Cappuccino
+            - 180-220ml für einen mittelgroßen Cappuccino (Standard)
+            - 250-300ml für einen großen Cappuccino
+            """
+        elif machine_state["type"] == "Americano":
+            type_specific = """
+            Für Americano kannst du eine Menge zwischen 100ml und 300ml wählen:
+            - 100-150ml für einen kleinen, intensiven Americano
+            - 180-220ml für einen mittelgroßen Americano (Standard)
+            - 250-300ml für einen großen Americano
+            """
+        elif machine_state["type"] == "Latte Macchiato":
+            type_specific = """
+            Für Latte Macchiato kannst du eine Menge zwischen 200ml und 400ml wählen:
+            - 200-250ml für einen kleinen Latte Macchiato
+            - 280-320ml für einen mittelgroßen Latte Macchiato (Standard)
+            - 350-400ml für einen großen Latte Macchiato
+            """
+        else:
+            type_specific = """
+            Die mögliche Menge hängt vom gewählten Kaffeetyp ab:
+            - Espresso: 35-60ml
+            - Cappuccino und Americano: 100-300ml
+            - Latte Macchiato: 200-400ml
+            """
+
+        return f"""
+        Der Benutzer fragt nach Informationen über die verfügbaren Mengen für Kaffee.
+
+        {type_specific}
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, ausführliche Antwort, die verschiedene Mengenoptionen erklärt und wie sich die Menge auf den Geschmack auswirkt.
+        Wenn bereits eine Menge gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+        """
+
+    elif focus_type == "production":
+        return f"""
+        Der Benutzer fragt nach Informationen über die Kaffeezubereitung.
+
+        Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die erklärt:
+        - Alle Parameter für den Kaffee sind bereits ausgewählt
+        - Der Benutzer kann jetzt die Zubereitung starten
+        - Er muss nur "Ja", "Starten" oder "Kaffee machen" sagen
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, ausführliche Antwort, die alle ausgewählten Parameter zusammenfasst und den Benutzer fragt, ob der Kaffee mit diesen Einstellungen zubereitet werden soll.
+        """
+
+    else:
+        return f"""
+        Der Benutzer fragt nach Informationen.
+
+        Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die den aktuellen Status der Kaffeemaschine erklärt:
+
+        Aktueller Maschinenstatus:
+        - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
+        - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
+        - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
+
+        Formuliere eine freundliche, ausführliche Antwort, die den aktuellen Status erklärt und vorschlägt, welcher Parameter als nächstes festgelegt werden sollte.
+        Wenn noch kein Kaffeetyp gewählt wurde, sollte dieser zuerst festgelegt werden.
+        """
 
 # Globale Variablen für den Konversationskontext und Maschinenstatus
 conversation_context = []
@@ -354,173 +1027,559 @@ def process_with_llm(json_data):
         try:
             data = json.loads(json_data) if isinstance(json_data, str) else json_data
 
-            # Maschinenstatus aktualisieren
+            # WICHTIG: Zugriff auf task_state um die tatsächlichen Werte zu bekommen
+            try:
+                from py_trees.blackboard import Client
+                task_state = Client(name="State of the coffee production task",
+                                    namespace="task_state")
+                task_state.register_key(key="type", access=py_trees.common.Access.READ)
+                task_state.register_key(key="strength", access=py_trees.common.Access.READ)
+                task_state.register_key(key="quantity", access=py_trees.common.Access.READ)
+                task_state.register_key(key="temp", access=py_trees.common.Access.READ)
+
+                # Aktualisiere machine_state mit den tatsächlichen Werten aus task_state
+                if task_state.type != 'default':
+                    machine_state["type"] = task_state.type
+                if task_state.strength != 'default':
+                    machine_state["strength"] = task_state.strength
+                if task_state.temp != 'default':
+                    machine_state["temp"] = task_state.temp
+                if task_state.quantity != 'default':
+                    machine_state["quantity"] = task_state.quantity
+            except Exception as e:
+                print(f"Fehler beim Zugriff auf task_state: {e}")
+
+            # Dann noch Aktualisierungen aus dem aktuellen data/json
             if "type" in data and data["type"] != "default":
                 machine_state["type"] = data["type"]
-            if "strength" in data and data["strength"] != "default":
+            elif "strength" in data and data["strength"] != "default":
                 machine_state["strength"] = data["strength"]
-            if "temp" in data and data["temp"] != "default":
+            elif "temp" in data and data["temp"] != "default":
                 machine_state["temp"] = data["temp"]
-            if "quantity" in data and data["quantity"] != "default":
+            elif "quantity" in data and data["quantity"] != "default":
                 machine_state["quantity"] = data["quantity"]
-        except:
-            pass
 
-        # Prompt für das LLM erstellen
-        prompt = f"""
-        Die Kaffeemaschine sendet folgende Informationen: {json.dumps(json_data, indent=2, ensure_ascii=False)}
+            # Debug: Ausgabe des aktuellen Maschinenstatus
+            print(f"Aktueller Maschinenstatus: {machine_state}")
+        except Exception as e:
+            print(f"Fehler beim Aktualisieren des Maschinenstatus: {e}")
+            import traceback
+            traceback.print_exc()  # Detaillierte Fehlerausgabe für Debugging
 
-        Aktueller Maschinenstatus:
+        # Bestimme den aktuellen Fokus des Entscheidungsbaums
+        current_focus = None
+        if isinstance(data, dict):
+            if "wandke_choose_type" in data and data["wandke_choose_type"] == "in focus":
+                current_focus = "type"
+            elif "wandke_choose_strength" in data and data["wandke_choose_strength"] == "in focus":
+                current_focus = "strength"
+            elif "wandke_choose_quantity" in data and data["wandke_choose_quantity"] == "in focus":
+                current_focus = "quantity"
+            elif "wandke_choose_temp" in data and data["wandke_choose_temp"] == "in focus":
+                current_focus = "temp"
+            elif "wandke_production_state" in data and data["wandke_production_state"] == "in focus":
+                current_focus = "production"
+            elif "wandke_production_state" in data and data["wandke_production_state"] == "ready":
+                current_focus = "ready"
+
+        # Überprüfe, ob es eine Anfrage nach Informationen ist
+        is_information_request = False
+        if isinstance(data, dict) and data.get("communicative_intent") == "request_information":
+            is_information_request = True
+
+        # Zusammenfassung des aktuellen Status für das LLM
+        status_summary = f"""
         - Kaffeetyp: {machine_state["type"] or "noch nicht gewählt"}
         - Stärke: {machine_state["strength"] or "noch nicht gewählt"}
+        - Menge: {machine_state["quantity"] or "noch nicht gewählt"} ml
         - Temperatur: {machine_state["temp"] or "noch nicht gewählt"}
-        - Menge: {machine_state["quantity"] or "noch nicht gewählt"}
-
-        Bisheriger Konversationsverlauf:
-        {json.dumps(conversation_context, indent=2, ensure_ascii=False)}
-
-        Formuliere eine natürliche, freundliche Antwort auf Deutsch, die die Kaffeemaschine sagen würde.
-        Beziehe dich auf den aktuellen Status und halte den Konversationsfluss aufrecht.
         """
 
-        # LLM-Antwort generieren
-        llm_response = llm_manager.process_prompt(prompt, SYSTEM_PROMPT)
+        # Bestimme, welche Art von Antwort generiert werden soll
+        if is_information_request:
+            # Bei einer Informationsanfrage, generiere eine detaillierte Antwort
+            if current_focus == "type":
+                info_prompt = f"""
+                Der Benutzer fragt nach Informationen über die verfügbaren Kaffeetypen.
 
-        # Antwort zum Konversationskontext hinzufügen
-        conversation_context.append({
-            "role": "assistant",
-            "content": llm_response
-        })
+                Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Kaffeetypen erklärt:
+                - Espresso: Ein kleiner, konzentrierter Kaffee mit intensivem Geschmack
+                - Cappuccino: Espresso mit aufgeschäumter Milch, cremig und ausgewogen
+                - Americano: Espresso mit heißem Wasser verlängert, ähnlich schwarzem Kaffee
+                - Latte Macchiato: Aufgeschäumte Milch mit Espresso, mild und cremig
 
-        # Konversationskontext auf eine vernünftige Größe begrenzen (letzte 10 Nachrichten)
-        if len(conversation_context) > 10:
-            conversation_context = conversation_context[-10:]
+                Aktueller Maschinenstatus:
+                {status_summary}
 
-        return llm_response
+                Formuliere eine freundliche, detaillierte Antwort, die alle Kaffeetypen erklärt und ihre Unterschiede hervorhebt.
+                Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                Wenn bereits ein Kaffeetyp gewählt wurde, erwähne dies in deiner Antwort und schlage vor, die Auswahl zu bestätigen oder zu ändern.
+                """
+            elif current_focus == "strength":
+                info_prompt = f"""
+                Der Benutzer fragt nach Informationen über die verfügbaren Kaffeestärken.
+
+                Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Stärken erklärt:
+                - very mild: Sehr mild und dezent, für einen sanften Kaffeegenuss
+                - mild: Leicht und sanft, aber etwas intensiver als very mild
+                - normal: Ausgewogene Stärke, Standard für die meisten Kaffeetrinker
+                - strong: Kräftig und intensiv, für Liebhaber von stärkerem Kaffee
+                - very strong: Besonders kräftig, mit vollem Körper und intensivem Geschmack
+                - double shot: Mit doppelter Kaffeemenge für Extra-Intensität
+                - double shot +: Noch intensiverer doppelter Schuss
+                - double shot ++: Maximale Intensität mit doppeltem Schuss
+
+                Aktueller Maschinenstatus:
+                {status_summary}
+
+                Formuliere eine freundliche, detaillierte Antwort, die alle Stärkegrade erklärt und ihre Unterschiede hervorhebt. 
+                Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                Wenn bereits eine Stärke gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                """
+            elif current_focus == "temp":
+                info_prompt = f"""
+                Der Benutzer fragt nach Informationen über die verfügbaren Temperaturen.
+
+                Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die folgende Temperaturen detailliert erklärt:
+                - normal: Standardtemperatur (ca. 85-90°C), angenehm heiß für die meisten Kaffeetrinker
+                - high: Erhöhte Temperatur (ca. 90-95°C), für Liebhaber von heißerem Kaffee
+                - very high: Maximale Temperatur (ca. 95-98°C), für besonders heiße Getränke
+
+                Aktueller Maschinenstatus:
+                {status_summary}
+
+                Formuliere eine freundliche, ausführliche Antwort, die alle Temperaturoptionen erklärt und ihre Unterschiede und Auswirkungen auf den Geschmack hervorhebt.
+                Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                Wenn bereits eine Temperatur gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                """
+            elif current_focus == "quantity":
+                # Mengenoptionen hängen vom gewählten Kaffeetyp ab
+                if machine_state["type"] == "Espresso":
+                    info_prompt = f"""
+                    Der Benutzer fragt nach Informationen über die verfügbaren Mengen für Espresso.
+
+                    Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die Folgendes detailliert erklärt:
+                    - Für Espresso kannst du zwischen 35ml und 60ml wählen
+                    - 35ml für einen sehr konzentrierten, intensiven Espresso
+                    - 45ml für einen klassischen Espresso (Standard)
+                    - 60ml für einen längeren Espresso (Lungo)
+
+                    Aktueller Maschinenstatus:
+                    {status_summary}
+
+                    Formuliere eine freundliche, ausführliche Antwort, die verschiedene Mengenoptionen erklärt und wie sich die Menge auf den Geschmack auswirkt.
+                    Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                    Wenn bereits eine Menge gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                    """
+                elif machine_state["type"] == "Cappuccino":
+                    info_prompt = f"""
+                    Der Benutzer fragt nach Informationen über die verfügbaren Mengen für Cappuccino.
+
+                    Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die Folgendes detailliert erklärt:
+                    - Für Cappuccino kannst du zwischen 100ml und 300ml wählen
+                    - 100-150ml für einen kleinen, intensiven Cappuccino
+                    - 180-220ml für einen mittelgroßen Cappuccino (Standard)
+                    - 250-300ml für einen großen Cappuccino
+
+                    Aktueller Maschinenstatus:
+                    {status_summary}
+
+                    Formuliere eine freundliche, ausführliche Antwort, die verschiedene Mengenoptionen erklärt und wie sich die Menge auf das Verhältnis von Kaffee zu Milchschaum auswirkt.
+                    Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                    Wenn bereits eine Menge gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                    """
+                elif machine_state["type"] == "Americano":
+                    info_prompt = f"""
+                    Der Benutzer fragt nach Informationen über die verfügbaren Mengen für Americano.
+
+                    Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die Folgendes detailliert erklärt:
+                    - Für Americano kannst du zwischen 100ml und 300ml wählen
+                    - 100-150ml für einen kleinen, intensiven Americano
+                    - 180-220ml für einen mittelgroßen Americano (Standard)
+                    - 250-300ml für einen großen Americano
+
+                    Aktueller Maschinenstatus:
+                    {status_summary}
+
+                    Formuliere eine freundliche, ausführliche Antwort, die verschiedene Mengenoptionen erklärt und wie sich die Menge auf die Intensität des Kaffees auswirkt.
+                    Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                    Wenn bereits eine Menge gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                    """
+                elif machine_state["type"] == "Latte Macchiato":
+                    info_prompt = f"""
+                    Der Benutzer fragt nach Informationen über die verfügbaren Mengen für Latte Macchiato.
+
+                    Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die Folgendes detailliert erklärt:
+                    - Für Latte Macchiato kannst du zwischen 200ml und 400ml wählen
+                    - 200-250ml für einen kleinen Latte Macchiato
+                    - 280-320ml für einen mittelgroßen Latte Macchiato (Standard)
+                    - 350-400ml für einen großen Latte Macchiato
+
+                    Aktueller Maschinenstatus:
+                    {status_summary}
+
+                    Formuliere eine freundliche, ausführliche Antwort, die verschiedene Mengenoptionen erklärt und wie sich die Menge auf das Verhältnis von Kaffee zu Milch auswirkt.
+                    Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                    Wenn bereits eine Menge gewählt wurde, erwähne dies in deiner Antwort und frage, ob der Benutzer diese bestätigen oder ändern möchte.
+                    """
+                else:
+                    info_prompt = f"""
+                    Der Benutzer fragt nach Informationen über die verfügbaren Kaffeemengen.
+
+                    Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die Folgendes detailliert erklärt:
+                    - Die mögliche Menge hängt vom gewählten Kaffeetyp ab:
+                    - Espresso: 35-60ml
+                    - Cappuccino und Americano: 100-300ml
+                    - Latte Macchiato: 200-400ml
+
+                    Aktueller Maschinenstatus:
+                    {status_summary}
+
+                    Formuliere eine freundliche, ausführliche Antwort, die erklärt, warum die Menge vom Kaffeetyp abhängt und welche Mengen für verschiedene Kaffeetypen typisch sind.
+                    Vermeide zu kurze Antworten - der Benutzer wünscht detaillierte Informationen.
+                    Wenn noch kein Kaffeetyp gewählt wurde, erwähne dies und erkläre, dass zuerst ein Typ gewählt werden muss, bevor die passende Menge festgelegt werden kann.
+                    """
+            elif current_focus == "production":
+                info_prompt = f"""
+                Der Benutzer fragt nach Informationen über die Kaffeezubereitung.
+
+                Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die erklärt:
+                - Alle Parameter für den Kaffee sind bereits ausgewählt
+                - Der Benutzer kann jetzt die Zubereitung starten
+                - Er muss nur "Ja", "Starten" oder "Kaffee machen" sagen
+
+                Aktueller Maschinenstatus:
+                {status_summary}
+
+                Formuliere eine freundliche, ausführliche Antwort, die alle ausgewählten Parameter zusammenfasst und den Benutzer fragt, ob der Kaffee mit diesen Einstellungen zubereitet werden soll.
+                """
+            else:
+                info_prompt = f"""
+                Der Benutzer fragt nach Informationen.
+
+                Deine Aufgabe ist es, eine informative, freundliche Antwort auf Deutsch zu formulieren, die den aktuellen Status der Kaffeemaschine erklärt:
+                {status_summary}
+
+                Formuliere eine freundliche, ausführliche Antwort, die den aktuellen Status erklärt und vorschlägt, welcher Parameter als nächstes festgelegt werden sollte.
+                Wenn noch kein Kaffeetyp gewählt wurde, sollte dieser zuerst festgelegt werden.
+                """
+
+            # LLM-Antwort für Informationsanfragen generieren
+            llm_response = llm_manager.process_prompt(info_prompt, SYSTEM_PROMPT)
+
+            # Antwort zum Konversationskontext hinzufügen
+            conversation_context.append({
+                "role": "assistant",
+                "content": llm_response
+            })
+
+            return llm_response
+        else:
+            # Bei normalen Nachrichten, generiere eine Antwort basierend auf dem Fokus wie bisher
+            next_action_prompt = ""
+            if current_focus == "type":
+                next_action_prompt = """
+                Bitte wählen Sie einen Kaffeetyp aus den folgenden Optionen:
+                - Espresso: Kleiner, konzentrierter Kaffee mit intensivem Geschmack
+                - Cappuccino: Espresso mit aufgeschäumter Milch, angenehm cremig
+                - Americano: Espresso mit zusätzlichem heißem Wasser, ähnlich dem schwarzen Filterkaffee
+                - Latte Macchiato: Aufgeschäumte Milch mit Espresso, mild und cremig
+
+                Welche Kaffeesorte möchtest du?
+                """
+            elif current_focus == "strength":
+                next_action_prompt = f"""
+                Für deinen {machine_state["type"] or "Kaffee"} kannst du folgende Stärkegrade wählen:
+                - very mild: Besonders mild und dezent
+                - mild: Leicht und sanft
+                - normal: Ausgewogene Stärke
+                - strong: Kräftig und intensiv
+                - very strong: Besonders kräftig
+                - double shot: Mit doppelter Kaffeemenge
+                - double shot +: Noch intensiverer doppelter Schuss
+                - double shot ++: Maximale Intensität mit doppeltem Schuss
+
+                Welche Stärke bevorzugst du?
+                """
+            elif current_focus == "quantity":
+                if machine_state["type"] == "Espresso":
+                    next_action_prompt = f"""
+                    Für Espresso wird üblicherweise eine Menge zwischen 35ml und 60ml empfohlen.
+                    - 35ml für einen sehr konzentrierten Espresso
+                    - 45ml für einen klassischen Espresso
+                    - 60ml für einen längeren Espresso (Lungo)
+
+                    Welche Menge möchtest du für deinen Espresso (zwischen 35ml und 60ml)?
+                    """
+                elif machine_state["type"] == "Cappuccino":
+                    next_action_prompt = f"""
+                    Für Cappuccino kannst du eine Menge zwischen 100ml und 300ml wählen.
+                    - 100-150ml für einen kleinen, intensiven Cappuccino
+                    - 180-220ml für einen mittelgroßen Cappuccino (häufigste Wahl)
+                    - 250-300ml für einen großen Cappuccino
+
+                    Welche Menge möchtest du für deinen Cappuccino (zwischen 100ml und 300ml)?
+                    """
+                elif machine_state["type"] == "Americano":
+                    next_action_prompt = f"""
+                    Für Americano kannst du eine Menge zwischen 100ml und 300ml wählen.
+                    - 100-150ml für einen kleinen, intensiven Americano
+                    - 180-220ml für einen mittelgroßen Americano (übliche Größe)
+                    - 250-300ml für einen großen Americano
+
+                    Welche Menge möchtest du für deinen Americano (zwischen 100ml und 300ml)?
+                    """
+                elif machine_state["type"] == "Latte Macchiato":
+                    next_action_prompt = f"""
+                    Für Latte Macchiato kannst du eine Menge zwischen 200ml und 400ml wählen.
+                    - 200-250ml für einen kleinen Latte Macchiato
+                    - 280-320ml für einen mittelgroßen Latte Macchiato (Standardgröße)
+                    - 350-400ml für einen großen Latte Macchiato
+
+                    Welche Menge möchtest du für deinen Latte Macchiato (zwischen 200ml und 400ml)?
+                    """
+                else:
+                    next_action_prompt = "Bitte wählen Sie die Menge für Ihren Kaffee. Die verfügbaren Optionen hängen von der gewählten Kaffeesorte ab."
+            elif current_focus == "temp":
+                next_action_prompt = f"""
+                Für deinen {machine_state["type"] or "Kaffee"} kannst du zwischen drei Temperaturstufen wählen:
+                - normal: Standardtemperatur, die für die meisten Kaffeetrinker angenehm ist
+                - high: Erhöhte Temperatur für einen heißeren Kaffee
+                - very high: Maximale Temperatur für besonders heiße Getränke
+
+                Welche Temperatur bevorzugst du?
+                """
+            elif current_focus == "production":
+                # Zusammenfassung und Bestätigungsaufforderung mit anschaulichen Beschreibungen
+                strength_desc = ""
+                if machine_state["strength"] == "very mild":
+                    strength_desc = "sehr milden"
+                elif machine_state["strength"] == "mild":
+                    strength_desc = "milden"
+                elif machine_state["strength"] == "normal":
+                    strength_desc = "normal starken"
+                elif machine_state["strength"] == "strong":
+                    strength_desc = "starken"
+                elif machine_state["strength"] == "very strong":
+                    strength_desc = "sehr starken"
+                elif machine_state["strength"] and "double shot" in machine_state["strength"]:
+                    strength_desc = machine_state["strength"]
+                else:
+                    strength_desc = machine_state["strength"] or "normalen"
+
+                temp_desc = ""
+                if machine_state["temp"] == "normal":
+                    temp_desc = "normaler Temperatur"
+                elif machine_state["temp"] == "high":
+                    temp_desc = "hoher Temperatur"
+                elif machine_state["temp"] == "very high":
+                    temp_desc = "sehr hoher Temperatur"
+                else:
+                    temp_desc = f"Temperatur '{machine_state['temp'] or 'normal'}'"
+
+                amount_desc = f"{machine_state['quantity'] or '?'} ml"
+
+                next_action_prompt = f"""
+                Perfekt! Du hast alle Parameter für deinen Kaffee ausgewählt:
+
+                - Kaffeetyp: {machine_state["type"]}
+                - Stärke: {strength_desc}
+                - Temperatur: {temp_desc}
+                - Menge: {amount_desc}
+
+                Möchtest du jetzt die Zubereitung starten? Sage einfach "Ja", "Starten" oder "Kaffee machen".
+                """
+            elif current_focus == "ready":
+                next_action_prompt = "Dein Kaffee ist fertig! Genieße deinen Kaffee. Möchtest du später einen weiteren Kaffee zubereiten?"
+            else:
+                next_action_prompt = "Was möchtest du als nächstes tun?"
+
+            # Verbesserter Prompt für das LLM mit nuancierteren Anweisungen
+            prompt = f"""
+            Die Kaffeemaschine sendet folgende Informationen: {json.dumps(json_data, indent=2, ensure_ascii=False)}
+
+            Aktueller Maschinenstatus:
+            {status_summary}
+
+            WICHTIG: Der Entscheidungsbaum fragt aktuell nach: {current_focus or "unbekannt"}
+
+            BESONDERS WICHTIG: 
+            - Wenn der Fokus auf "production" ist, wurde bereits alles festgelegt und du solltest nur danach fragen, ob der Kaffee jetzt zubereitet werden soll. Frage in diesem Fall NICHT erneut nach Parametern wie Temperatur oder Stärke!
+            - Wenn der Fokus auf "ready" ist, ist der Kaffee bereits fertig zubereitet. Teile dem Benutzer mit, dass sein Kaffee fertig ist, und frage ihn, ob er noch etwas anderes möchte.
+            - Bei Fragen des Nutzers nach möglichen Werten (z.B. "Welche Stärken gibt es?"), gib detaillierte Informationen.
+            - Sei tolerant gegenüber ungenauen oder umgangssprachlichen Ausdrücken. Verstehe, was der Nutzer meint, auch wenn es nicht exakt den Fachbegriffen entspricht.
+
+            Nächste Aktion vom Benutzer: {next_action_prompt}
+
+            Bisheriger Konversationsverlauf:
+            {json.dumps(conversation_context[-3:] if len(conversation_context) > 3 else conversation_context, indent=2, ensure_ascii=False)}
+
+            Formuliere eine natürliche, freundliche Antwort auf Deutsch, die die Kaffeemaschine sagen würde.
+            Beziehe dich auf alle bereits ausgewählten Parameter und frage nur nach dem Parameter, den der Entscheidungsbaum aktuell fokussiert.
+            Verwende eine persönliche, freundliche Sprache und vermeide technische Begriffe, die ein Laie nicht verstehen würde.
+            """
+
+            # LLM-Antwort generieren
+            llm_response = llm_manager.process_prompt(prompt, SYSTEM_PROMPT)
+
+            # Wenn der Kaffee fertig ist, ersetze die Antwort immer durch eine korrekte Bestätigung
+            if current_focus == "ready":
+                try:
+                    # Vor der Erstellung der Abschlussnachricht die Zustandsinformationen aktualisieren
+                    reconstruct_machine_state()
+
+                    # Direkt die Werte aus machine_state verwenden
+                    kaffeetyp = machine_state["type"] or "Espresso"
+                    staerke = machine_state["strength"] or "normal"
+                    temperatur = machine_state["temp"] or "normal"  # Hier war der Fehler
+                    menge = machine_state["quantity"] or "40"
+
+                    # Debug-Ausgabe
+                    print(
+                        f"Gefundene Parameter für Abschlussnachricht: Typ={kaffeetyp}, Stärke={staerke}, Temp={temperatur}, Menge={menge}")
+
+                    # Erstelle eine freundlichere, ansprechendere Nachricht
+                    llm_response = f"""
+                           Dein {kaffeetyp} ist fertig zubereitet! 🎉
+
+                           Hier ist dein {kaffeetyp} mit {staerke} Stärke, {temperatur} Temperatur und {menge}ml.
+
+                           Genieße deinen frisch zubereiteten Kaffee! Wenn du später einen weiteren Kaffee möchtest oder Fragen zur Kaffeemaschine hast, stehe ich dir gerne zur Verfügung.
+                           """
+                except Exception as e:
+                    print(f"Fehler beim Erstellen der Ready-Nachricht: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    llm_response = "Dein Kaffee ist jetzt fertig! Genieße deinen Kaffee. Kann ich dir sonst noch etwas anbieten?"
+
+                    # Durchsuche die letzten Nachrichten rückwärts, um die aktuellsten Werte zu finden
+                    for msg in reversed(message_queue):
+                        if "raw_json" in msg:
+                            try:
+                                raw_data = json.loads(msg["raw_json"])
+                                # Sammle Typ-Information
+                                if "type" in raw_data and raw_data["type"] not in [None, "default",
+                                                                                   "None"] and selected_type is None:
+                                    selected_type = raw_data["type"]
+                                # Sammle Stärke-Information
+                                if "strength" in raw_data and raw_data["strength"] not in [None, "default",
+                                                                                           "None"] and selected_strength is None:
+                                    selected_strength = raw_data["strength"]
+                                # Sammle Temperatur-Information
+                                if "temp" in raw_data and raw_data["temp"] not in [None, "default",
+                                                                                   "None"] and selected_temp is None:
+                                    selected_temp = raw_data["temp"]
+                                # Sammle Mengen-Information
+                                if "quantity" in raw_data and raw_data["quantity"] not in [None, "default",
+                                                                                           "None"] and selected_quantity is None:
+                                    selected_quantity = raw_data["quantity"]
+                            except:
+                                pass
+
+                        # Überprüfe auch die Nachricht selbst auf Informationen
+                        if "message" in msg:
+                            if selected_type is None and any(typ in msg["message"].lower() for typ in
+                                                             ["espresso", "cappuccino", "americano",
+                                                              "latte macchiato"]):
+                                for typ in ["Espresso", "Cappuccino", "Americano", "Latte Macchiato"]:
+                                    if typ.lower() in msg["message"].lower():
+                                        selected_type = typ
+                                        break
+
+                    # Durchsuche auch die Konversationshistorie
+                    for msg in conversation_context:
+                        if msg["role"] == "user" and selected_type is None:
+                            if any(typ in msg["content"].lower() for typ in
+                                   ["espresso", "cappuccino", "americano", "latte macchiato"]):
+                                for typ in ["Espresso", "Cappuccino", "Americano", "Latte Macchiato"]:
+                                    if typ.lower() in msg["content"].lower():
+                                        selected_type = typ
+                                        break
+                        elif msg["role"] == "user" and selected_strength is None:
+                            if any(strength in msg["content"].lower() for strength in
+                                   ["very mild", "mild", "normal", "strong", "very strong", "double shot"]):
+                                for strength in ["very mild", "mild", "normal", "strong", "very strong", "double shot"]:
+                                    if strength in msg["content"].lower():
+                                        selected_strength = strength
+                                        break
+
+                    # Fallbacks, falls Werte immer noch fehlen
+                    kaffeetyp = selected_type or machine_state["type"] or "Espresso"
+                    staerke = selected_strength or machine_state["strength"] or "normal"
+                    temperatur = selected_temp or machine_state["temp"] or "normal"
+                    menge = selected_quantity or machine_state["quantity"] or "40"
+
+                    # Debug-Ausgabe
+                    print(
+                        f"Gefundene Parameter für Abschlussnachricht: Typ={kaffeetyp}, Stärke={staerke}, Temp={temperatur}, Menge={menge}")
+
+                    # Erstelle eine freundlichere, ansprechendere Nachricht
+                    llm_response = f"""
+                    Dein {kaffeetyp} ist fertig zubereitet! 🎉
+
+                    Hier ist dein {kaffeetyp} mit {staerke} Stärke, {temperatur} Temperatur und {menge}ml.
+
+                    Genieße deinen frisch zubereiteten Kaffee! Wenn du später einen weiteren Kaffee möchtest oder Fragen zur Kaffeemaschine hast, stehe ich dir gerne zur Verfügung.
+                    """
+                except Exception as e:
+                    print(f"Fehler beim Erstellen der Ready-Nachricht: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    llm_response = "Dein Kaffee ist jetzt fertig! Genieße deinen Kaffee. Kann ich dir sonst noch etwas anbieten?"
+
+            # Bei der Produktionsbestätigung auch eine klare Nachricht sicherstellen
+            elif current_focus == "production" and (
+                    "stärke" in llm_response.lower() or "temperatur" in llm_response.lower()):
+                try:
+                    kaffeetyp = machine_state["type"] if machine_state["type"] not in [None, "default",
+                                                                                       "None"] else "Kaffee"
+                    staerke = machine_state["strength"] if machine_state["strength"] not in [None, "default",
+                                                                                             "None"] else "normal"
+                    temperatur = machine_state["temp"] if machine_state["temp"] not in [None, "default",
+                                                                                        "None"] else "normal"
+                    menge = machine_state["quantity"] if machine_state["quantity"] not in [None, "default",
+                                                                                           "None"] else "Standard"
+
+                    # Ansprechendere, detailliertere Bestätigungsnachricht
+                    llm_response = f"""
+                    Super! Alle Einstellungen sind perfekt:
+
+                    - {kaffeetyp}
+                    - Stärke: {staerke}
+                    - Temperatur: {temperatur}
+                    - Menge: {menge}ml
+
+                    Möchtest du jetzt deinen {kaffeetyp} zubereiten lassen? Sage einfach "Ja" oder "Kaffee starten".
+                    """
+                except Exception as e:
+                    print(f"Fehler beim Erstellen der Produktionsbestätigungs-Nachricht: {e}")
+                    llm_response = "Alles eingestellt! Möchtest du die Kaffeezubereitung jetzt starten?"
+
+            # Antwort zum Konversationskontext hinzufügen
+            conversation_context.append({
+                "role": "assistant",
+                "content": llm_response
+            })
+
+            # Konversationskontext auf eine vernünftige Größe begrenzen (letzte 10 Nachrichten)
+            if len(conversation_context) > 10:
+                conversation_context = conversation_context[-10:]
+
+            return llm_response
     except Exception as e:
         print(f"Fehler bei der LLM-Verarbeitung: {e}")
+        import traceback
+        traceback.print_exc()  # Detaillierte Fehlerausgabe für Debugging
         return "Entschuldigung, bei der Verarbeitung ist ein Fehler aufgetreten. Wie kann ich dir mit deinem Kaffee helfen?"
 
 
-def process_user_message(message):
-    """Verarbeitet eine Nachricht vom Benutzer und leitet sie an den Entscheidungsbaum weiter"""
-    global decision_tree_pipe, llm_client, conversation_context
-    try:
-        # Sende sofort eine Statusmeldung, dass die Verarbeitung beginnt (für UI)
-        socketio.emit(
-            "processing_status",
-            {
-                "type": "llm_json",
-                "status": "started"
-            }
-        )
-
-        # Nachricht zum Kontext hinzufügen
-        conversation_context.append({
-            "role": "user",
-            "content": message
-        })
-
-        # LLM nutzen, um die Benutzereingabe zu interpretieren
-        interpretation_prompt = f"""
-        Als KI-Assistent für eine Kaffeemaschine sollst du Benutzereingaben interpretieren und in ein strukturiertes JSON-Format umwandeln.
-        Die Kaffeemaschine unterstützt folgende Parameter:
-        - Kaffeetypen: Espresso, Cappuccino, Americano, Latte Macchiato
-        - Stärke: very mild, mild, normal, strong, very strong, double shot, double shot +, double shot ++
-        - Temperatur: normal, high, very high
-        - Menge: numerischer Wert in ml, abhängig vom Kaffeetyp (Espresso: 35-60ml, usw.)
-
-        Analysiere die Benutzernachricht: "{message}"
-
-        Erstelle ein JSON-Objekt mit NUR den erkannten Parametern. Füge KEINE Schlüssel mit null-Werten hinzu.
-        Mögliche Felder sind:
-        - "communicative_intent": "greeting", "inform", oder "request_information"
-        - "type": Kaffeetyp (falls in der Nachricht erwähnt)
-        - "strength": Stärke (falls in der Nachricht erwähnt)
-        - "temp": Temperatur (falls in der Nachricht erwähnt)
-        - "quantity": Menge in ml (falls in der Nachricht erwähnt)
-
-        Für jeden erkannten Parameter (type, strength, temp, quantity) füge auch einen entsprechenden "wandke_choose_X": "NoDiagnosis" Eintrag hinzu.
-
-        Beispiel:
-        Wenn der Benutzer "Ich möchte einen Espresso" sagt, sollte das JSON nur sein:
-        {{
-          "communicative_intent": "inform",
-          "type": "Espresso",
-          "wandke_choose_type": "NoDiagnosis"
-        }}
-
-        Falls der Benutzer Start oder Bestätigung erwähnt, füge "wandke_production_state": "started" hinzu.
-        Falls keine spezifischen Parameter erwähnt werden, aber die Nachricht eine Begrüßung ist, setze nur "communicative_intent": "greeting".
-
-        Antworte NUR mit dem JSON-Objekt, ohne zusätzlichen Text oder Erklärungen.
-        """
-
-        # Interpret the user message using the LLM
-        llm_response = llm_manager.process_prompt(interpretation_prompt)
-        print(f"LLM-Interpretation der Benutzereingabe: {llm_response}")
-
-        # Versuche, die LLM-Antwort als JSON zu parsen
-        try:
-            json_data = json.loads(llm_response)
-
-            # Entferne alle Schlüssel mit None/null-Werten
-            json_data = {k: v for k, v in json_data.items() if v is not None}
-
-        except json.JSONDecodeError:
-            # Wenn das LLM kein valides JSON zurückgibt, extrahiere es mit regex
-            import re
-            json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
-            if json_match:
-                try:
-                    json_data = json.loads(json_match.group(0))
-                    # Entferne alle Schlüssel mit None/null-Werten
-                    json_data = {k: v for k, v in json_data.items() if v is not None}
-                except:
-                    # Fallback zur einfachen Nachricht
-                    json_data = {"message": message}
-            else:
-                # Fallback zur einfachen Nachricht
-                json_data = {"message": message}
-
-        # Signalisiere, dass der JSON-Verarbeitungsschritt abgeschlossen ist
-        socketio.emit(
-            "processing_status",
-            {
-                "type": "llm_json",
-                "status": "completed"
-            }
-        )
-
-        # Sende eine Statusmeldung, dass der Entscheidungsbaum startet (für UI)
-        socketio.emit(
-            "processing_status",
-            {
-                "type": "decision_tree",
-                "status": "started"
-            }
-        )
-
-        # Senden der Nachricht an den Entscheidungsbaum
-        print(f"Sende an Entscheidungsbaum: {json_data}")
-        decision_tree_pipe.send(json.dumps(json_data))
-        return True
-    except Exception as e:
-        print(f"Fehler bei der Verarbeitung der Benutzernachricht: {e}")
-        # Informiere den Client über den Fehler (für UI)
-        socketio.emit(
-            "processing_status",
-            {
-                "type": "decision_tree",
-                "status": "error",
-                "error": str(e)
-            }
-        )
-        return False
-
 def listen_to_decision_tree():
     """Hört auf Antworten vom Entscheidungsbaum und verarbeitet sie mit dem LLM"""
-    global decision_tree_pipe, message_queue
+    global decision_tree_pipe, message_queue, machine_state, conversation_context
+
+    # Speichere den aktuellen Fokus für bessere Kontinuität
+    current_focus = None
+    last_focus_time = 0
 
     while True:
         try:
@@ -528,6 +1587,194 @@ def listen_to_decision_tree():
                 # Nachricht vom Entscheidungsbaum empfangen
                 tree_message = decision_tree_pipe.recv()
                 print(f"Vom Entscheidungsbaum empfangen: {tree_message}")
+
+                # Versuche, die Nachricht als JSON zu parsen, um besseren Einblick zu haben
+                try:
+                    json_message = json.loads(tree_message) if isinstance(tree_message, str) else tree_message
+                    print(f"Entscheidungsbaum-Nachricht als JSON: {json_message}")
+
+                    # VERBESSERT: Rekonstruiere Zustand aus allen Quellen
+                    reconstruct_machine_state()
+
+                    # NEU: Prüfe und speichere den aktuellen Fokus
+                    if "wandke_choose_type" in json_message and json_message["wandke_choose_type"] == "in focus":
+                        current_focus = "type"
+                        last_focus_time = time.time()
+                    elif "wandke_choose_strength" in json_message and json_message[
+                        "wandke_choose_strength"] == "in focus":
+                        current_focus = "strength"
+                        last_focus_time = time.time()
+                    elif "wandke_choose_quantity" in json_message and json_message[
+                        "wandke_choose_quantity"] == "in focus":
+                        current_focus = "quantity"
+                        last_focus_time = time.time()
+                    elif "wandke_choose_temp" in json_message and json_message["wandke_choose_temp"] == "in focus":
+                        current_focus = "temp"
+                        last_focus_time = time.time()
+                    elif "wandke_production_state" in json_message and json_message[
+                        "wandke_production_state"] == "in focus":
+                        current_focus = "production"
+                        last_focus_time = time.time()
+
+                    # NEU: Prüfe, ob es sich um eine direkte Informationsanfrage handelt
+                    if "message" in json_message and json_message.get("communicative_intent") == "request_information":
+                        # Bei einer Informationsanfrage, sende die Nachricht direkt an den Client
+                        # ohne weitere LLM-Verarbeitung
+                        direct_message = json_message["message"]
+
+                        # Erstelle eine einzigartige ID für die Nachricht
+                        message_id = int(time.time() * 1000)
+
+                        # Sende die direkte Antwort an den Client
+                        socketio.emit("chat_message", {
+                            "sender": "assistant",
+                            "message": direct_message,
+                            "id": message_id
+                        })
+
+                        print(f"Direkte Informationsantwort gesendet: {direct_message}")
+
+                        # An die Warteschlange anhängen
+                        message_queue.append({
+                            "sender": "assistant",
+                            "message": direct_message,
+                            "raw_json": tree_message,
+                            "id": message_id
+                        })
+
+                        # Füge die Antwort zum Konversationskontext hinzu
+                        conversation_context.append({
+                            "role": "assistant",
+                            "content": direct_message
+                        })
+
+                        # NEU: Wiederhole den aktuellen Fokus-Prompt, um den Entscheidungsbaum im Fokus zu halten
+                        # Verwende nicht nur message_queue, sondern auch den gespeicherten current_focus
+                        if current_focus and (time.time() - last_focus_time) < 60:  # Nur wenn aktuell (< 60 Sekunden)
+                            # Stelle sicher, dass der Fokus auf dem aktuellen Parameter bleibt
+                            focus_message = {"communicative_intent": "request_information"}
+
+                            if current_focus == "type":
+                                focus_message["wandke_choose_type"] = "in focus"
+                            elif current_focus == "strength":
+                                focus_message["wandke_choose_strength"] = "in focus"
+                            elif current_focus == "quantity":
+                                focus_message["wandke_choose_quantity"] = "in focus"
+                            elif current_focus == "temp":
+                                focus_message["wandke_choose_temp"] = "in focus"
+                            elif current_focus == "production":
+                                focus_message["wandke_production_state"] = "in focus"
+
+                            # Verarbeite den Fokus mit dem LLM, um eine natürlichere Antwort zu generieren
+                            llm_response = process_with_llm(json.dumps(focus_message))
+
+                            # Erstelle eine einzigartige ID für die Fokus-Nachricht
+                            focus_message_id = int(time.time() * 1000) + 1  # +1 um Duplikate zu vermeiden
+
+                            # Sende die Fokus-Nachricht nach einer kurzen Verzögerung
+                            time.sleep(0.5)  # Kleine Verzögerung, damit die Nachfrage-Antwort zuerst angezeigt wird
+
+                            socketio.emit("chat_message", {
+                                "sender": "assistant",
+                                "message": llm_response,
+                                "id": focus_message_id
+                            })
+
+                            # An die Warteschlange anhängen
+                            message_queue.append({
+                                "sender": "assistant",
+                                "message": llm_response,
+                                "raw_json": json.dumps(focus_message),
+                                "id": focus_message_id
+                            })
+
+                            # Zum Konversationskontext hinzufügen
+                            conversation_context.append({
+                                "role": "assistant",
+                                "content": llm_response
+                            })
+
+                            print(f"Fokus-Nachricht gesendet: {llm_response}")
+                        else:
+                            # Wenn kein aktueller Fokus bekannt ist, versuche ihn zu finden
+                            try:
+                                for msg in reversed(
+                                        message_queue[:-1]):  # Überspringe die gerade hinzugefügte Nachricht
+                                    if "raw_json" in msg:
+                                        last_json = json.loads(msg["raw_json"])
+                                        if "wandke_choose_type" in last_json and last_json[
+                                            "wandke_choose_type"] == "in focus":
+                                            current_focus = "type"
+                                            break
+                                        elif "wandke_choose_strength" in last_json and last_json[
+                                            "wandke_choose_strength"] == "in focus":
+                                            current_focus = "strength"
+                                            break
+                                        elif "wandke_choose_quantity" in last_json and last_json[
+                                            "wandke_choose_quantity"] == "in focus":
+                                            current_focus = "quantity"
+                                            break
+                                        elif "wandke_choose_temp" in last_json and last_json[
+                                            "wandke_choose_temp"] == "in focus":
+                                            current_focus = "temp"
+                                            break
+                                        elif "wandke_production_state" in last_json and last_json[
+                                            "wandke_production_state"] == "in focus":
+                                            current_focus = "production"
+                                            break
+
+                                if current_focus:
+                                    # Wenn ein Fokus gefunden wurde, verwende ihn
+                                    focus_message = {"communicative_intent": "request_information"}
+                                    if current_focus == "type":
+                                        focus_message["wandke_choose_type"] = "in focus"
+                                    elif current_focus == "strength":
+                                        focus_message["wandke_choose_strength"] = "in focus"
+                                    elif current_focus == "quantity":
+                                        focus_message["wandke_choose_quantity"] = "in focus"
+                                    elif current_focus == "temp":
+                                        focus_message["wandke_choose_temp"] = "in focus"
+                                    elif current_focus == "production":
+                                        focus_message["wandke_production_state"] = "in focus"
+
+                                    # Verarbeite den Fokus mit dem LLM
+                                    llm_response = process_with_llm(json.dumps(focus_message))
+
+                                    # Erstelle eine einzigartige ID für die Fokus-Nachricht
+                                    focus_message_id = int(time.time() * 1000) + 1
+
+                                    # Kleine Verzögerung
+                                    time.sleep(0.5)
+
+                                    socketio.emit("chat_message", {
+                                        "sender": "assistant",
+                                        "message": llm_response,
+                                        "id": focus_message_id
+                                    })
+
+                                    # An die Warteschlange anhängen
+                                    message_queue.append({
+                                        "sender": "assistant",
+                                        "message": llm_response,
+                                        "raw_json": json.dumps(focus_message),
+                                        "id": focus_message_id
+                                    })
+
+                                    # Zum Konversationskontext hinzufügen
+                                    conversation_context.append({
+                                        "role": "assistant",
+                                        "content": llm_response
+                                    })
+
+                                    print(f"Nachträglich ermittelter Fokus-Nachricht gesendet: {llm_response}")
+                            except Exception as focus_error:
+                                print(f"Fehler beim Wiederherstellen des Fokus: {focus_error}")
+
+                        # Überspringe die normale Verarbeitung
+                        continue
+
+                except Exception as e:
+                    print(f"Fehler beim Parsen der Nachricht: {e}")
 
                 # Signalisiere, dass der Entscheidungsbaum fertig ist und LLM beginnt (für UI)
                 socketio.emit(
@@ -559,8 +1806,20 @@ def listen_to_decision_tree():
                     }
                 )
 
-                # An die Warteschlange für die Übertragung an den Client anhängen
+                # Erstelle eine einzigartige ID für die Nachricht
                 message_id = int(time.time() * 1000)  # Unix-Timestamp in Millisekunden
+
+                # WICHTIG: Nachricht an den Client senden
+                socketio.emit("chat_message", {
+                    "sender": "assistant",
+                    "message": llm_response,
+                    "id": message_id
+                })
+
+                # Debug-Ausgabe
+                print(f"SocketIO-Nachricht gesendet: id={message_id}, sender=assistant")
+
+                # An die Warteschlange für die Übertragung an den Client anhängen (für spätere Verwendung)
                 message_queue.append({
                     "sender": "assistant",
                     "message": llm_response,
@@ -568,13 +1827,110 @@ def listen_to_decision_tree():
                     "id": message_id
                 })
 
-                # Nur die LLM-Antwort über SocketIO an den Client senden
-                # Füge eine eindeutige ID hinzu, um doppelte Nachrichten zu vermeiden
-                socketio.emit("chat_message", {
-                    "sender": "assistant",
-                    "message": llm_response,
-                    "id": message_id
-                })
+                # NEU: Wenn der Kaffee fertig ist, sende eine abschließende Nachricht und deaktiviere die Eingabe
+                try:
+                    data = json.loads(tree_message) if isinstance(tree_message, str) else tree_message
+                    if "wandke_production_state" in data and data["wandke_production_state"] == "ready":
+                        # Extrahiere die Kaffee-Parameter
+                        kaffeetyp = None
+                        staerke = None
+                        temperatur = None
+                        menge = None
+
+                        # Durchsuche die letzten Nachrichten rückwärts
+                        for msg in reversed(message_queue):
+                            if "raw_json" in msg:
+                                try:
+                                    raw_data = json.loads(msg["raw_json"])
+                                    # Sammle Typ-Information
+                                    if "type" in raw_data and raw_data["type"] not in [None, "default",
+                                                                                       "None"] and kaffeetyp is None:
+                                        kaffeetyp = raw_data["type"]
+                                    # Sammle Stärke-Information
+                                    if "strength" in raw_data and raw_data["strength"] not in [None, "default",
+                                                                                               "None"] and staerke is None:
+                                        staerke = raw_data["strength"]
+                                    # Sammle Temperatur-Information
+                                    if "temp" in raw_data and raw_data["temp"] not in [None, "default",
+                                                                                       "None"] and temperatur is None:
+                                        temperatur = raw_data["temp"]
+                                    # Sammle Mengen-Information
+                                    if "quantity" in raw_data and raw_data["quantity"] not in [None, "default",
+                                                                                               "None"] and menge is None:
+                                        menge = raw_data["quantity"]
+                                except:
+                                    pass
+
+                        # Auch in den Nachrichten nach Kaffeetypen suchen
+                        if kaffeetyp is None:
+                            for msg in message_queue:
+                                if "message" in msg:
+                                    msg_text = msg["message"].lower()
+                                    if "espresso" in msg_text and kaffeetyp is None:
+                                        kaffeetyp = "Espresso"
+                                    elif "cappuccino" in msg_text and kaffeetyp is None:
+                                        kaffeetyp = "Cappuccino"
+                                    elif "americano" in msg_text and kaffeetyp is None:
+                                        kaffeetyp = "Americano"
+                                    elif "latte" in msg_text and kaffeetyp is None:
+                                        kaffeetyp = "Latte Macchiato"
+
+                        # Fülle Standardwerte
+                        kaffeetyp = kaffeetyp or "Kaffee"
+                        staerke = staerke or "normal"
+                        temperatur = temperatur or "normal"
+                        menge = menge or "Standard"
+
+                        # Kurze Pause, damit die Fertigmeldung zuerst angezeigt wird
+                        time.sleep(2)
+
+                        # Sende eine System-Nachricht zur Bestätigung des Abschlusses
+                        completion_message = f"Interaktion erfolgreich abgeschlossen! Die Kaffeemaschine hat Ihren {kaffeetyp} zubereitet. Vielen Dank für die Nutzung des Kaffee-Assistenten."
+
+                        socketio.emit("chat_message", {
+                            "sender": "System",
+                            "message": completion_message,
+                            "id": int(time.time() * 1000)
+                        })
+
+                        # Deaktiviere die Eingabe über ein spezielles Event
+                        socketio.emit("interaction_complete", {
+                            "status": "complete",
+                            "message": "Interaktion abgeschlossen",
+                            "kaffee_details": {
+                                "typ": kaffeetyp,
+                                "staerke": staerke,
+                                "temperatur": temperatur,
+                                "menge": menge
+                            }
+                        })
+
+                        # Log ohne Session-Zugriff
+                        print(f"ERFOLGREICHE INTERAKTION ABGESCHLOSSEN:")
+                        print(f"  Kaffeetyp: {kaffeetyp}")
+                        print(f"  Stärke: {staerke}")
+                        print(f"  Temperatur: {temperatur}")
+                        print(f"  Menge: {menge}")
+
+                        # Log-Datei anlegen über eine separate Funktion
+                        try:
+                            log_file = os.path.join(LOGS_FOLDER, "completed_interactions.log")
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            log_entry = f"{timestamp} - ERFOLGREICHE INTERAKTION:\n"
+                            log_entry += f"  Kaffeetyp: {kaffeetyp}\n"
+                            log_entry += f"  Stärke: {staerke}\n"
+                            log_entry += f"  Temperatur: {temperatur}\n"
+                            log_entry += f"  Menge: {menge}\n"
+                            log_entry += "---------------------------------------------\n"
+
+                            with open(log_file, "a") as f:
+                                f.write(log_entry)
+                        except Exception as log_error:
+                            print(f"Fehler beim Loggen: {log_error}")
+                except Exception as e:
+                    print(f"Fehler beim Senden der Abschlussnachricht: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             time.sleep(0.1)
         except BrokenPipeError:
@@ -605,11 +1961,127 @@ def listen_to_decision_tree():
             )
             time.sleep(2)
 
+def reconstruct_machine_state():
+        """Rekonstruiert den machine_state aus verschiedenen Quellen"""
+        global machine_state, message_queue, conversation_context
 
-# Füge diesen Code zu llm_integration.py hinzu, um die Session-Lebensdauer zu verwalten
+        print("Rekonstruiere den machine_state aus allen Quellen...")
 
-# Füge diesen Import hinzu, falls noch nicht vorhanden
+        # Versuche zuerst, alle Werte aus dem task_state zu bekommen
+        try:
+            from py_trees.blackboard import Client
+            task_state = Client(name="State of the coffee production task",
+                                namespace="task_state")
+            task_state.register_key(key="type", access=py_trees.common.Access.READ)
+            task_state.register_key(key="strength", access=py_trees.common.Access.READ)
+            task_state.register_key(key="quantity", access=py_trees.common.Access.READ)
+            task_state.register_key(key="temp", access=py_trees.common.Access.READ)
 
+            # Aktualisiere machine_state mit den tatsächlichen Werten aus task_state
+            if task_state.type != 'default':
+                machine_state["type"] = task_state.type
+                print(f"Aus task_state: type = {task_state.type}")
+            if task_state.strength != 'default':
+                machine_state["strength"] = task_state.strength
+                print(f"Aus task_state: strength = {task_state.strength}")
+            if task_state.temp != 'default':
+                machine_state["temp"] = task_state.temp
+                print(f"Aus task_state: temp = {task_state.temp}")
+            if task_state.quantity != 'default':
+                machine_state["quantity"] = task_state.quantity
+                print(f"Aus task_state: quantity = {task_state.quantity}")
+        except Exception as e:
+            print(f"Fehler beim Zugriff auf task_state: {e}")
+
+        # Durchsuche dann die letzten Nachrichten im Nachrichtenverlauf
+        try:
+            for msg in reversed(message_queue):
+                if "raw_json" in msg:
+                    try:
+                        raw_data = json.loads(msg["raw_json"])
+
+                        # NEU: Aktualisiere direkt aus den Benutzereingaben
+                        if raw_data.get("communicative_intent") == "inform":
+                            if "type" in raw_data and raw_data["type"] not in [None, "default",
+                                                                               "None"] and raw_data.get(
+                                    "wandke_choose_type") == "NoDiagnosis":
+                                machine_state["type"] = raw_data["type"]
+                                print(f"Aus Nachrichtenverlauf: type = {raw_data['type']}")
+
+                            if "strength" in raw_data and raw_data["strength"] not in [None, "default",
+                                                                                       "None"] and raw_data.get(
+                                    "wandke_choose_strength") == "NoDiagnosis":
+                                machine_state["strength"] = raw_data["strength"]
+                                print(f"Aus Nachrichtenverlauf: strength = {raw_data['strength']}")
+
+                            if "temp" in raw_data and raw_data["temp"] not in [None, "default",
+                                                                               "None"] and raw_data.get(
+                                    "wandke_choose_temp") == "NoDiagnosis":
+                                machine_state["temp"] = raw_data["temp"]
+                                print(f"Aus Nachrichtenverlauf: temp = {raw_data['temp']}")
+
+                            if "quantity" in raw_data and raw_data["quantity"] not in [None, "default",
+                                                                                       "None"] and raw_data.get(
+                                    "wandke_choose_quantity") == "NoDiagnosis":
+                                machine_state["quantity"] = raw_data["quantity"]
+                                print(f"Aus Nachrichtenverlauf: quantity = {raw_data['quantity']}")
+                    except Exception as e:
+                        print(f"Fehler beim Parsen der Nachricht: {e}")
+                        continue
+        except Exception as e:
+            print(f"Fehler beim Durchsuchen des Nachrichtenverlaufs: {e}")
+
+        # Zuletzt, durchsuche die Konversationshistorie nach expliziten Werten
+        try:
+            # Prüfe auf Kaffeetyp
+            if machine_state["type"] is None:
+                for msg in conversation_context:
+                    if msg["role"] == "user":
+                        msg_lower = msg["content"].lower()
+                        for typ in ["espresso", "cappuccino", "americano", "latte macchiato"]:
+                            if typ in msg_lower:
+                                machine_state["type"] = typ.capitalize()
+                                print(f"Aus Konversation: type = {typ.capitalize()}")
+                                break
+
+            # Prüfe auf Stärke
+            if machine_state["strength"] is None:
+                for msg in conversation_context:
+                    if msg["role"] == "user":
+                        msg_lower = msg["content"].lower()
+                        for strength in ["very mild", "mild", "normal", "strong", "very strong", "double shot",
+                                         "double shot +", "double shot ++"]:
+                            if strength in msg_lower:
+                                machine_state["strength"] = strength
+                                print(f"Aus Konversation: strength = {strength}")
+                                break
+
+            # Prüfe auf Temperatur
+            if machine_state["temp"] is None:
+                for msg in conversation_context:
+                    if msg["role"] == "user":
+                        msg_lower = msg["content"].lower()
+                        for temp in ["normal", "high", "very high"]:
+                            if temp in msg_lower:
+                                machine_state["temp"] = temp
+                                print(f"Aus Konversation: temp = {temp}")
+                                break
+
+            # Prüfe auf Menge
+            if machine_state["quantity"] is None:
+                for msg in conversation_context:
+                    if msg["role"] == "user":
+                        msg_lower = msg["content"].lower()
+                        # Suche nach Zahlen
+                        import re
+                        quantity_match = re.search(r'(\d+)', msg_lower)
+                        if quantity_match:
+                            machine_state["quantity"] = quantity_match.group(1)
+                            print(f"Aus Konversation: quantity = {quantity_match.group(1)}")
+        except Exception as e:
+            print(f"Fehler beim Durchsuchen der Konversationshistorie: {e}")
+
+        print(f"Aktueller Maschinenstatus nach Rekonstruktion: {machine_state}")
 
 @app.before_request
 def before_request():
@@ -629,6 +2101,7 @@ def handle_keep_alive():
         session.modified = True
         return {"status": "success"}
 
+
 # Flask-Routen
 @app.route("/")
 @app.route("/home")
@@ -640,6 +2113,7 @@ def home():
     return render_template("index.html", username=session.get("username", "Gast"))
 
 
+# Korrigierte login-Funktion für llm_integration.py
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Login-Seite"""
@@ -654,7 +2128,7 @@ def login():
         # Optionale Felder
         fullname = request.form.get("fullname", "")
         vpid = request.form.get("vpid", "")
-        selected_llm = request.form.get("llm", "llama3")
+        selected_llm = request.form.get("llm", "llama3-8b")  # Standardwert angepasst
 
         # In Session speichern
         session["username"] = username
@@ -682,14 +2156,13 @@ def login():
     else:
         return render_template("login.html")
 
-
 @app.route("/logout")
 def logout():
     """Logout-Funktion"""
     username = session.get("username", "unbekannt")
 
     # Bot-Prozess beenden, wenn er existiert
-    global bot_process
+    global bot_process, conversation_context, machine_state
     if bot_process is not None and bot_process.is_alive():
         try:
             bot_process.terminate()
@@ -697,6 +2170,15 @@ def logout():
             print(f"Bot-Prozess bei Logout von {username} beendet")
         except Exception as e:
             print(f"Fehler beim Beenden des Bot-Prozesses bei Logout: {e}")
+
+    # Maschineneinstellungen zurücksetzen
+    conversation_context = []
+    machine_state = {
+        "type": None,
+        "strength": None,
+        "temp": None,
+        "quantity": None
+    }
 
     # Aktivität loggen, falls ein Benutzer eingeloggt war
     try:
@@ -711,51 +2193,90 @@ def logout():
     return redirect(url_for("login"))
 
 
-# Füge diese Funktion zu llm_integration.py hinzu, um den Konversationskontext zurückzusetzen
+# Verbesserte restart_interaction-Funktion für llm_integration.py
+@app.route("/restart_interaction", methods=["GET"])
+def restart_interaction():
+    """Setzt den Bot zurück und startet eine neue Interaktion"""
+    try:
+        global conversation_context, machine_state, message_queue
+
+        # Konversationskontext und Maschinenstatus zurücksetzen
+        conversation_context = []
+        machine_state = {
+            "type": None,
+            "strength": None,
+            "temp": None,
+            "quantity": None
+        }
+
+        # Nachrichtenverlauf löschen
+        message_queue = []
+
+        # Logge den Neustart der Interaktion
+        if "username" in session:
+            log_user_activity("new_interaction", {"username": session.get("username", "unbekannt")})
+            print(f"Neue Interaktion für Benutzer {session.get('username', 'unbekannt')} gestartet")
+
+        # Stelle sicher, dass die Session nicht abläuft
+        if 'username' in session:
+            session.modified = True
+
+        # Füge eine kleine Verzögerung ein, um sicherzustellen, dass alle Prozesse beendet sind
+        time.sleep(0.5)
+
+        # Bot-Prozess neu starten
+        success = start_bot_process()
+        if not success:
+            print("FEHLER: Konnte Bot-Prozess nicht neu starten")
+
+        return redirect(url_for("home"))
+    except Exception as e:
+        print(f"Fehler beim Neustart der Interaktion: {e}")
+        import traceback
+        traceback.print_exc()
+        return redirect(url_for("home"))
 
 @app.route("/reset_context", methods=["POST"])
 def reset_context():
     """Setzt den Konversationskontext zurück"""
     try:
         # Konversationskontext zurücksetzen
-        session["conversation_context"] = []
-        session["machine_state"] = {
+        global conversation_context, machine_state
+        conversation_context = []
+        machine_state = {
             "type": None,
             "strength": None,
             "temp": None,
             "quantity": None
         }
-        session.modified = True
 
         return jsonify({"status": "success", "message": "Konversationskontext wurde zurückgesetzt"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# Ändere auch die bestehende reset_bot Funktion, um den Kontext zurückzusetzen
-
 @app.route("/reset_bot", methods=["POST"])
 def reset_bot():
     """Setzt den Bot-Prozess und den Konversationskontext zurück, wenn er hängen bleibt"""
     try:
+        global conversation_context, machine_state
+
         # Bot-Prozess zurücksetzen
         start_bot_process()
 
         # Konversationskontext zurücksetzen
-        if "conversation_context" in session:
-            session["conversation_context"] = []
-        if "machine_state" in session:
-            session["machine_state"] = {
-                "type": None,
-                "strength": None,
-                "temp": None,
-                "quantity": None
-            }
-        session.modified = True
+        conversation_context = []
+        machine_state = {
+            "type": None,
+            "strength": None,
+            "temp": None,
+            "quantity": None
+        }
 
         return jsonify({"status": "success", "message": "Bot und Konversationskontext wurden zurückgesetzt"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 @app.route("/message", methods=["POST"])
 def handle_synthetic_message():
@@ -776,53 +2297,6 @@ def handle_synthetic_message():
     except Exception as e:
         print(f"Fehler bei der Verarbeitung einer synthetischen Nachricht: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
-
-
-
-# Socket.IO-Events
-@socketio.on("connect")
-def handle_connect():
-    """Verbindung mit dem Client herstellen"""
-    # Überprüfe, ob ein Benutzer eingeloggt ist
-    if "username" not in session:
-        # Wenn kein Benutzer eingeloggt ist, lehne die Verbindung ab
-        return False
-
-    session["client_id"] = request.sid
-    print(f"Client verbunden: {request.sid}")
-
-    # Starte den Bot-Prozess neu, wenn ein Benutzer verbindet
-    try:
-        start_bot_process()
-
-        # Sende eine Begrüßungsnachricht, dass der Bot gestartet wurde
-        socketio.emit(
-            "chat_message",
-            {
-                "sender": "System",
-                "message": "Kaffee-Assistent wird gestartet..."
-            },
-            room=request.sid
-        )
-
-        # Setze das LLM aus der Session, falls verfügbar
-        if "selected_llm" in session:
-            llm_manager.set_current_llm(session["selected_llm"])
-    except Exception as e:
-        print(f"Fehler beim Starten des Bot-Prozesses: {e}")
-        socketio.emit(
-            "chat_message",
-            {
-                "sender": "System",
-                "message": f"Fehler beim Starten des Kaffee-Assistenten: {e}"
-            },
-            room=request.sid
-        )
-
-
-# Finde in llm_integration.py auch die Funktion handle_message und ersetze sie mit folgendem Code,
-# um eindeutige IDs für Benutzernachrichten hinzuzufügen:
 
 @socketio.on("message")
 def handle_message(data):
@@ -864,12 +2338,68 @@ def handle_disconnect():
         # Benutzername und Client-ID werden erst beim nächsten Login entfernt
 
 
+# Korrigierte Socket.IO connect-Funktion für llm_integration.py
+@socketio.on("connect")
+def handle_connect():
+    """Verbindung mit dem Client herstellen"""
+    # Überprüfe, ob ein Benutzer eingeloggt ist
+    if "username" not in session:
+        # Wenn kein Benutzer eingeloggt ist, lehne die Verbindung ab
+        return False
+
+    session["client_id"] = request.sid
+    print(f"Client verbunden: {request.sid}")
+
+    # Zurücksetzen des globalen Maschinenstatus für neue Verbindungen
+    global machine_state, conversation_context
+    machine_state = {
+        "type": None,
+        "strength": None,
+        "temp": None,
+        "quantity": None
+    }
+    conversation_context = []
+
+    print("Globaler Maschinenstatus zurückgesetzt")
+
+    # Starte den Bot-Prozess neu, wenn ein Benutzer verbindet
+    try:
+        success = start_bot_process()
+        print(f"Bot-Prozess gestartet: {success}")
+
+        # Sende eine Begrüßungsnachricht, dass der Bot gestartet wurde
+        socketio.emit(
+            "chat_message",
+            {
+                "sender": "System",
+                "message": "Kaffee-Assistent wird gestartet..."
+            },
+            room=request.sid
+        )
+
+        # Setze das LLM aus der Session, falls verfügbar
+        if "selected_llm" in session:
+            llm_manager.set_current_llm(session["selected_llm"])
+            print(f"LLM auf {session['selected_llm']} gesetzt")
+    except Exception as e:
+        print(f"Fehler beim Starten des Bot-Prozesses: {e}")
+        import traceback
+        traceback.print_exc()
+        socketio.emit(
+            "chat_message",
+            {
+                "sender": "System",
+                "message": f"Fehler beim Starten des Kaffee-Assistenten: {e}"
+            },
+            room=request.sid
+        )
+
 @socketio.on("select_llm")
 def handle_llm_selection(data):
     """Verarbeitet die Auswahl eines LLMs"""
     global llm_manager
 
-    llm_name = data.get("llm", "llama3")
+    llm_name = data.get("llm", "llama3-8b")  # Standardwert angepasst
     username = session.get("username", "unbekannt")
 
     if llm_manager.set_current_llm(llm_name):
@@ -900,22 +2430,56 @@ def handle_llm_selection(data):
         )
 
 
-# Füge diese neue Route zur llm_integration.py hinzu
 @socketio.on("message_rating")
-def handle_message_rating(data):
+def handle_message_rating_event(data):
     """Verarbeitet die Bewertung einer Nachricht"""
     try:
         message_id = data.get("messageId", "unbekannt")
         rating = data.get("rating", 0)
         username = session.get("username", "unbekannt")
+        vpid = session.get("vpid", "unbekannt")
+        current_llm = session.get("selected_llm", "unbekannt")
 
         print(f"Bewertung erhalten: Nachricht {message_id} von {username} mit {rating}/7 bewertet")
+
+        # Finde die bewertete Nachricht im message_queue
+        rated_message_content = None
+        last_user_message = None
+
+        for idx, msg in enumerate(message_queue):
+            if "id" in msg and str(msg["id"]) == str(message_id):
+                rated_message_content = msg.get("message", "Nachricht nicht gefunden")
+                # Versuche, die vorherige Benutzernachricht zu finden
+                if idx > 0 and message_queue[idx - 1].get("sender") != "assistant":
+                    last_user_message = message_queue[idx - 1].get("message", "Keine vorherige Nachricht")
+                break
+
+        # Wenn wir die vorherige Nachricht nicht gefunden haben, suche in conversation_context
+        if last_user_message is None and len(conversation_context) >= 2:
+            for i in range(len(conversation_context) - 1, 0, -1):
+                if conversation_context[i]["role"] == "assistant" and conversation_context[i - 1]["role"] == "user":
+                    last_user_message = conversation_context[i - 1].get("content", "Keine vorherige Nachricht")
+                    break
 
         # Logge die Bewertung
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_file = os.path.join(LOGS_FOLDER, "message_ratings.log")
 
-        log_entry = f"{timestamp} - BEWERTUNG: Benutzer: {username}, Nachricht-ID: {message_id}, Bewertung: {rating}/7\n"
+        # Erweiterte Log-Informationen
+        log_entry = f"{timestamp} - BEWERTUNG:\n"
+        log_entry += f"  VP-ID: {vpid}\n"
+        log_entry += f"  Benutzer: {username}\n"
+        log_entry += f"  LLM-Modell: {current_llm}\n"
+        log_entry += f"  Nachricht-ID: {message_id}\n"
+        log_entry += f"  Bewertung: {rating}/7\n"
+
+        if last_user_message:
+            log_entry += f"  Vorherige Benutzernachricht: {last_user_message}\n"
+
+        if rated_message_content:
+            log_entry += f"  Bewertete Bot-Antwort: {rated_message_content}\n"
+
+        log_entry += "---------------------------------------------\n"
 
         with open(log_file, "a") as f:
             f.write(log_entry)
@@ -924,9 +2488,11 @@ def handle_message_rating(data):
         return {"status": "success"}
     except Exception as e:
         print(f"Fehler bei der Verarbeitung der Nachrichtenbewertung: {e}")
+        import traceback
+        traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
-
+# Der Server-Start muss außerhalb aller Funktionen sein
 if __name__ == "__main__":
     # Session-Datei löschen, wenn vorhanden (für Entwicklungsumgebung)
     import os
@@ -945,10 +2511,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Info: Konnte Session nicht löschen: {e}")
 
-    # LLM-Client initialisieren
-    init_llm_client()
-
     # Bot-Prozess wird nicht mehr hier gestartet, sondern erst wenn ein Client verbindet
+    print("Starte Flask-Server auf Port 5001...")
 
     # Flask-App starten
     socketio.run(app, host="0.0.0.0", port=5001, debug=True)
+
+
+
+

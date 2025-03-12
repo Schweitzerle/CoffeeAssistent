@@ -872,6 +872,11 @@ def create_root(team_member: multiprocessing.connection.Connection, agenda)-> py
                                StartCoffeeMaker("Start Coffee Machine", team_member, agenda)])])
     return root
 
+# Ergänzungen für virtual_agent.py um den Task-State zurückzusetzen
+
+# Die Funktion create_chatbot sollte angepasst werden, um sicherzustellen, dass
+# der task_state bei jeder Erstellung eines neuen Chatbots zurückgesetzt wird:
+
 def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> None:
     agenda = []
 
@@ -888,6 +893,7 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     user_says_that.register_key(key="wandke_production_state", access=py_trees.common.Access.WRITE)
     user_says_that.register_key(key="communicative_intent", access=py_trees.common.Access.WRITE)
 
+    # Stets mit Standardwerten initialisieren
     user_says_that.type = 'default'
     user_says_that.strength = 'default'
     user_says_that.temperature = 'default'
@@ -912,6 +918,7 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     user_belief.register_key(key="wandke_production_state", access=py_trees.common.Access.WRITE)
     user_belief.register_key(key="communicative_intent", access=py_trees.common.Access.WRITE)
 
+    # Immer mit Standardwerten initialisieren
     user_belief.type = 'default'
     user_belief.strength = 'default'
     user_belief.temperature = 'default'
@@ -937,6 +944,7 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     bot_believes.register_key(key="content_to_communicate", access=py_trees.common.Access.WRITE)
     bot_believes.register_key(key="communication_established", access=py_trees.common.Access.WRITE)
 
+    # Immer die Werte zurücksetzen
     bot_believes.type = 'default'
     bot_believes.strength = 'default'
     bot_believes.temperature = 'default'
@@ -957,13 +965,17 @@ def create_chatbot(pipe_connection: multiprocessing.connection.Connection) -> No
     task_state.register_key(key="quantity", access=py_trees.common.Access.WRITE)
     task_state.register_key(key="temp", access=py_trees.common.Access.WRITE)
 
+    # Stets zurücksetzen auf Standardwerte
     task_state.type = 'default'
     task_state.strength = 'default'
     task_state.temp = 'default'
     task_state.quantity = 'default'
 
+    # Wichtig: Log-Ausgabe zur Bestätigung des Resets
+    print("=== Task-State und Bot-Believes auf Standardwerte zurückgesetzt ===")
+    print(f"task_state: type={task_state.type}, strength={task_state.strength}, temp={task_state.temp}, quantity={task_state.quantity}")
+
     root = create_root(pipe_connection, agenda)
- #   py_trees.display.render_dot_tree(root)
 
     while True:
         root.tick_once()
