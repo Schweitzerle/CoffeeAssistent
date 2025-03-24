@@ -1,0 +1,54 @@
+2025-03-13 22:01:23 - LOGIN: Benutzer: JRing, Voller Name: Jule Ring, VP-ID: 1, LLM: llama3-8b
+2025-03-13 22:11:00 - LOGOUT: Benutzer: JRing
+2025-03-13 22:39:48 - LOGIN: Benutzer: JRing, Voller Name: Jule Ring, VP-ID: 1, LLM: phi3-mini
+2025-03-13 22:51:17 - LOGOUT: Benutzer: JRing
+2025-03-13 22:51:31 - LOGIN: Benutzer: JRing, Voller Name: Jule Ring, VP-ID: 1, LLM: openchat-3.5
+2025-03-13 22:56:41 - LOGOUT: Benutzer: JRing
+2025-03-14 09:46:15 - LOGIN: Benutzer: TMichl, Voller Name: Tanja Michl, VP-ID: 2, LLM: llama3-8b
+2025-03-14 09:52:22 - LOGOUT: Benutzer: TMichl
+2025-03-14 09:53:58 - LOGIN: Benutzer: TMichl, Voller Name: Tanja Michl, VP-ID: 2, LLM: openchat-3.5
+2025-03-14 10:06:00 - LOGOUT: Benutzer: TMichl
+2025-03-14 10:06:16 - LOGIN: Benutzer: TMichl, Voller Name: Tanja Michl, VP-ID: 2, LLM: phi3-mini
+2025-03-14 10:11:03 - LOGOUT: Benutzer: TMichl
+2025-03-14 10:48:05 - LOGIN: Benutzer: HMichl, Voller Name: Helmut Michl, VP-ID: 3, LLM: openchat-3.5
+2025-03-14 10:53:07 - LOGOUT: Benutzer: HMichl
+2025-03-14 10:53:34 - LOGIN: Benutzer: HMichl, Voller Name: Helmut Michl, VP-ID: 3, LLM: llama3-8b
+2025-03-14 10:56:39 - LOGOUT: Benutzer: HMichl
+2025-03-14 10:57:11 - LOGIN: Benutzer: HMichl, Voller Name: Helmut Michl, VP-ID: 3, LLM: phi3-mini
+2025-03-14 11:01:33 - LOGOUT: Benutzer: HMichl
+2025-03-17 09:09:22 - LOGIN: Benutzer: JMichl, Voller Name: Jannis Michl, VP-ID: 4, LLM: openchat-3.5
+2025-03-17 09:12:31 - LOGOUT: Benutzer: JMichl
+2025-03-17 09:13:02 - LOGIN: Benutzer: JMichl, Voller Name: Jannis Michl, VP-ID: 4, LLM: phi3-mini
+2025-03-17 09:24:05 - LOGOUT: Benutzer: JMichl
+2025-03-17 09:24:26 - LOGIN: Benutzer: JMichl, Voller Name: Jannis Michl, VP-ID: 4, LLM: llama3-8b
+2025-03-17 09:30:21 - LOGOUT: Benutzer: JMichl
+2025-03-17 10:48:33 - LOGIN: Benutzer: CImm, Voller Name: Christian Imm, VP-ID: 5, LLM: phi3-mini
+2025-03-17 10:51:19 - LOGOUT: Benutzer: CImm
+2025-03-17 10:51:45 - LOGIN: Benutzer: CImm, Voller Name: Christian Imm, VP-ID: 5, LLM: openchat-3.5
+2025-03-17 10:55:07 - LOGOUT: Benutzer: CImm
+2025-03-17 10:55:29 - LOGIN: Benutzer: CImm, Voller Name: Christian Imm, VP-ID: 5, LLM: llama3-8b
+2025-03-17 10:58:54 - LOGOUT: Benutzer: CImm
+2025-03-17 19:35:01 - LOGIN: Benutzer: dere, Voller Name: kilian, VP-ID: 6, LLM: phi3-mini
+2025-03-17 19:43:23 - LOGOUT: Benutzer: dere
+2025-03-17 19:43:52 - LOGIN: Benutzer: dere, Voller Name: kilian , VP-ID: 6, LLM: llama3-8b
+2025-03-17 19:49:51 - LOGOUT: Benutzer: dere
+2025-03-17 19:50:22 - LOGIN: Benutzer: dere, Voller Name: kilian, VP-ID: 6, LLM: openchat-3.5
+2025-03-17 19:55:31 - LOGOUT: Benutzer: dere
+2025-03-18 11:23:21 - LOGIN: Benutzer: Lukas, Voller Name: Lukas, VP-ID: 7, LLM: llama3-8b
+2025-03-18 11:27:06 - LOGOUT: Benutzer: Lukas
+2025-03-18 11:27:35 - LOGIN: Benutzer: Lukas, Voller Name: Lukas, VP-ID: 7, LLM: phi3-mini
+2025-03-18 11:35:14 - LOGOUT: Benutzer: Lukas
+2025-03-18 11:35:25 - LOGIN: Benutzer: Lukas, Voller Name: Lukas, VP-ID: 7, LLM: openchat-3.5
+2025-03-18 11:38:05 - LOGOUT: Benutzer: Lukas
+2025-03-18 11:44:40 - LOGIN: Benutzer: Felix, Voller Name: Felix, VP-ID: 8, LLM: llama3-8b
+2025-03-18 11:48:42 - LOGOUT: Benutzer: Felix
+2025-03-18 11:48:57 - LOGIN: Benutzer: Felix, Voller Name: Felix, VP-ID: 8, LLM: openchat-3.5
+2025-03-18 11:52:05 - LOGOUT: Benutzer: Felix
+2025-03-18 11:52:22 - LOGIN: Benutzer: Felix, Voller Name: Felix, VP-ID: 8, LLM: phi3-mini
+2025-03-18 11:56:53 - LOGOUT: Benutzer: Felix
+2025-03-18 12:03:52 - LOGIN: Benutzer: Lino, Voller Name: Lino, VP-ID: 9, LLM: openchat-3.5
+2025-03-18 12:06:25 - LOGOUT: Benutzer: Lino
+2025-03-18 12:06:37 - LOGIN: Benutzer: Lino, Voller Name: Lino, VP-ID: 9, LLM: llama3-8b
+2025-03-18 12:09:48 - LOGOUT: Benutzer: Lino
+2025-03-18 12:10:06 - LOGIN: Benutzer: Lino, Voller Name: Lino, VP-ID: 9, LLM: phi3-mini
+2025-03-18 12:13:23 - LOGOUT: Benutzer: Lino

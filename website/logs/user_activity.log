@@ -1,0 +1,59 @@
+2025-03-16 14:14:48 - LOGOUT: Benutzer: ante
+2025-03-16 14:15:00 - LOGIN: Benutzer: ante, Voller Name: Matthias Antholzer, VP-ID: 13, LLM: llama3-8b
+2025-03-16 14:18:41 - LOGOUT: Benutzer: ante
+2025-03-16 14:19:31 - LOGIN: Benutzer: ante, Voller Name: Matthias Antholzer, VP-ID: 13, LLM: phi3-mini
+2025-03-16 14:27:02 - LOGOUT: Benutzer: ante
+2025-03-16 14:27:14 - LOGIN: Benutzer: ante, Voller Name: Matthias Antholzer, VP-ID: 13, LLM: openchat-3.5
+2025-03-16 14:31:02 - LOGOUT: Benutzer: ante
+2025-03-16 14:41:49 - LOGIN: Benutzer: hias, Voller Name: Matthias Lorenz, VP-ID: 14, LLM: llama3-8b
+2025-03-16 14:51:05 - LOGOUT: Benutzer: hias
+2025-03-16 14:51:22 - LOGIN: Benutzer: hias, Voller Name: Matthias Lorenz, VP-ID: 14, LLM: openchat-3.5
+2025-03-16 14:59:02 - LOGOUT: Benutzer: hias
+2025-03-16 14:59:20 - LOGIN: Benutzer: hias, Voller Name: Matthias Lorenz, VP-ID: 14, LLM: phi3-mini
+2025-03-16 15:08:23 - LOGOUT: Benutzer: hias
+2025-03-16 15:47:49 - LOGIN: Benutzer: andi, Voller Name: Andreas Niederalter, VP-ID: 15, LLM: openchat-3.5
+2025-03-16 15:56:58 - LOGOUT: Benutzer: andi
+2025-03-16 15:57:24 - LOGIN: Benutzer: andi, Voller Name: Andreas Niederalter, VP-ID: 15, LLM: llama3-8b
+2025-03-16 16:04:28 - LOGOUT: Benutzer: andi
+2025-03-16 16:04:58 - LOGIN: Benutzer: andi, Voller Name: Andreas Niederalter, VP-ID: 15, LLM: phi3-mini
+2025-03-16 16:12:01 - LOGOUT: Benutzer: andi
+2025-03-17 17:48:37 - LOGIN: Benutzer: niko, Voller Name: Niko Schweizer, VP-ID: 16, LLM: openchat-3.5
+2025-03-17 17:52:47 - LOGOUT: Benutzer: niko
+2025-03-17 17:53:08 - LOGIN: Benutzer: niko, Voller Name: Niko Schweizer, VP-ID: 16, LLM: phi3-mini
+2025-03-17 17:57:12 - LOGOUT: Benutzer: niko
+2025-03-17 17:57:27 - LOGIN: Benutzer: niko, Voller Name: Niko Schweizer, VP-ID: 16, LLM: llama3-8b
+2025-03-17 18:00:30 - LOGOUT: Benutzer: niko
+2025-03-17 18:01:04 - LOGIN: Benutzer: selina, Voller Name: Selina Schweizer, VP-ID: 17, LLM: phi3-mini
+2025-03-17 18:05:30 - LOGOUT: Benutzer: selina
+2025-03-17 18:05:48 - LOGIN: Benutzer: selina, Voller Name: Selina Schweizer, VP-ID: 17, LLM: openchat-3.5
+2025-03-17 18:09:13 - LOGOUT: Benutzer: selina
+2025-03-17 18:09:26 - LOGIN: Benutzer: selina, Voller Name: Selina Schweizer, VP-ID: 17, LLM: llama3-8b
+2025-03-17 18:13:48 - LOGOUT: Benutzer: selina
+2025-03-18 11:04:34 - LOGIN: Benutzer: nini, Voller Name: Janine Schiele, VP-ID: 18, LLM: phi3-mini
+2025-03-18 11:12:56 - LOGOUT: Benutzer: nini
+2025-03-18 11:13:29 - LOGIN: Benutzer: nini, Voller Name: Janine Schiele, VP-ID: 18, LLM: llama3-8b
+2025-03-18 11:15:47 - LOGOUT: Benutzer: nini
+2025-03-18 11:15:58 - LOGIN: Benutzer: nini, Voller Name: Janine Schiele, VP-ID: 18, LLM: openchat-3.5
+2025-03-18 11:22:34 - LOGOUT: Benutzer: nini
+2025-03-18 11:36:37 - LOGIN: Benutzer: timo, Voller Name: Timo Langer, VP-ID: 10, LLM: openchat-3.5
+2025-03-18 11:40:19 - LOGOUT: Benutzer: timo
+2025-03-18 11:40:33 - LOGIN: Benutzer: timo, Voller Name: Timo Langer, VP-ID: 10, LLM: phi3-mini
+2025-03-18 11:46:35 - LOGOUT: Benutzer: timo
+2025-03-18 11:46:45 - LOGIN: Benutzer: timo, Voller Name: Timo Langer, VP-ID: 10, LLM: llama3-8b
+2025-03-18 11:49:49 - LOGOUT: Benutzer: timo
+2025-03-18 11:55:55 - LOGIN: Benutzer: tim, Voller Name: Tim Sprengart, VP-ID: 11, LLM: phi3-mini
+2025-03-18 11:58:56 - LOGOUT: Benutzer: tim
+2025-03-18 11:59:14 - LOGIN: Benutzer: tim, Voller Name: Tim Sprengart, VP-ID: 11, LLM: openchat-3.5
+2025-03-18 12:04:17 - LOGOUT: Benutzer: tim
+2025-03-18 12:04:28 - LOGIN: Benutzer: tim, Voller Name: Tim Sprengart, VP-ID: 11, LLM: llama3-8b
+2025-03-18 12:09:06 - LOGOUT: Benutzer: tim
+2025-03-18 12:13:33 - LOGIN: Benutzer: mathi, Voller Name: Matthias Flickinger, VP-ID: 12, LLM: phi3-mini
+2025-03-18 12:16:05 - LOGOUT: Benutzer: mathi
+2025-03-18 12:16:48 - LOGIN: Benutzer: mathi, Voller Name: Matthias Flickinger, VP-ID: 12, LLM: llama3-8b
+2025-03-18 12:18:27 - LOGOUT: Benutzer: mathi
+2025-03-18 12:18:38 - LOGIN: Benutzer: mathi, Voller Name: Matthias Flickinger, VP-ID: 12, LLM: openchat-3.5
+2025-03-18 12:20:29 - LOGOUT: Benutzer: mathi
+2025-03-18 16:01:27 - LOGIN: Benutzer: selina, Voller Name: Selina Schweizer, VP-ID: 22, LLM: openchat-3.5
+2025-03-18 16:04:45 - LOGIN: Benutzer: selina, Voller Name: Selina Schweizer, VP-ID: 22, LLM: openchat-3.5
+2025-03-18 16:58:10 - LOGIN: Benutzer: Schweizerle, Voller Name: Julian Schweizer, VP-ID: 0, LLM: llama3-8b
+2025-03-19 18:22:35 - LOGIN: Benutzer: Test, Voller Name: Test Test, VP-ID: 0, LLM: llama3-8b

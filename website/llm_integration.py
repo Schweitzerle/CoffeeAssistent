@@ -4,11 +4,14 @@ from flask_socketio import SocketIO, emit
 import json
 import multiprocessing
 import time
+import re
 from threading import Thread
+from datetime import datetime
 import os
 from datetime import datetime, timedelta
+import requests
 
-os.environ["OPENROUTER_API_KEY"] = "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"
+os.environ["OPENROUTER_API_KEY"] = "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"
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "kaffee123"
